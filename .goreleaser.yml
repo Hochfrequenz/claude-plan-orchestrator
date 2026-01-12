@@ -30,20 +30,44 @@ builds:
       - -X main.date={{.Date}}
 
 archives:
-  - id: default
-    format: tar.gz
+  - id: unix
+    formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
-    format_overrides:
-      - goos: windows
-        format: zip
+    builds:
+      - claude-orch
     files:
       - README.md
       - LICENSE*
       - scripts/onboard.sh
+    rlcp: true
+    filter:
+      include:
+        - goos: linux
+        - goos: darwin
+
+  - id: windows
+    formats:
+      - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    builds:
+      - claude-orch
+    files:
+      - README.md
+      - LICENSE*
+      - scripts/onboard.sh
+    rlcp: true
+    filter:
+      include:
+        - goos: windows
 
 checksum:
   name_template: 'checksums.txt'
@@ -68,17 +92,3 @@ release:
   draft: false
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
-
-brews:
-  - name: claude-orch
-    repository:
-      owner: hochfrequenz
-      name: homebrew-tap
-    directory: Formula
-    homepage: "https://github.com/hochfrequenz/claude-plan-orchestrator"
-    description: "Autonomous development orchestrator for Claude Code agents"
-    license: "MIT"
-    install: |
-      bin.install "claude-orch"
-    test: |
-      system "#{bin}/claude-orch", "--version"
