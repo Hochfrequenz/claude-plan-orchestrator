@@ -82,6 +82,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				moduleName := m.modules[m.selectedModule].Name
 				return m, runModuleTests(m.projectRoot, moduleName)
 			}
+		case "+", "=":
+			// Increase max agents (only on agents tab)
+			if m.activeTab == 2 {
+				if m.maxActive < 10 {
+					m.maxActive++
+					m.configChanged = true
+				}
+			}
+		case "-", "_":
+			// Decrease max agents (only on agents tab)
+			if m.activeTab == 2 {
+				if m.maxActive > 1 {
+					m.maxActive--
+					m.configChanged = true
+				}
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -124,6 +140,16 @@ func (m *Model) SetTasks(tasks []*domain.Task) {
 // SetQueued updates the queued tasks list
 func (m *Model) SetQueued(tasks []*domain.Task) {
 	m.queued = tasks
+}
+
+// GetMaxActive returns the current max active agents setting
+func (m Model) GetMaxActive() int {
+	return m.maxActive
+}
+
+// ConfigChanged returns true if the configuration was modified
+func (m Model) ConfigChanged() bool {
+	return m.configChanged
 }
 
 // runModuleTests executes tests for a specific module via MCP test runner

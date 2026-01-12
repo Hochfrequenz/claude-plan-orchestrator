@@ -104,3 +104,19 @@ func DefaultConfigPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "claude-orchestrator", "config.toml")
 }
+
+// Save writes the configuration to a TOML file
+func (c *Config) Save(path string) error {
+	// Ensure parent directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	data, err := toml.Marshal(c)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0644)
+}

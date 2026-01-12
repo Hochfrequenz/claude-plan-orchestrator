@@ -57,6 +57,9 @@ type Model struct {
 	// Config for test execution
 	projectRoot string
 
+	// Config state
+	configChanged bool
+
 	// Refresh
 	lastRefresh time.Time
 }

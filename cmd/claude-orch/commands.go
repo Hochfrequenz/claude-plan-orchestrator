@@ -285,8 +285,22 @@ func runTUI(cmd *cobra.Command, args []string) error {
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		return err
+	}
+
+	// Save config if it was changed in the TUI
+	if m, ok := finalModel.(tui.Model); ok && m.ConfigChanged() {
+		cfg.General.MaxParallelAgents = m.GetMaxActive()
+		cfgPath := configPath
+		if cfgPath == "" {
+			cfgPath = config.DefaultConfigPath()
+		}
+		if err := cfg.Save(cfgPath); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+		fmt.Printf("Saved max_parallel_agents = %d to config\n", m.GetMaxActive())
 	}
 
 	return nil

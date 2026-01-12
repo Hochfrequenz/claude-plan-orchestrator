@@ -132,6 +132,8 @@ func (m Model) View() string {
 			viewModeStr = "module"
 		}
 		statusBar = fmt.Sprintf(" [tab]switch [v]iew mode (%s) [j/k]scroll [r]efresh [q]uit ", viewModeStr)
+	case 2: // Agents
+		statusBar = " [tab]switch [+/-]max agents [r]efresh [q]uit "
 	case 3: // Modules
 		statusBar = " [tab]switch [j/k]scroll [x]run tests [r]efresh [q]uit "
 	default:
@@ -405,33 +407,54 @@ func (m Model) formatTaskLine(task *domain.Task) string {
 func (m Model) renderAgentsDetail() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("AGENTS"))
+	b.WriteString("\n\n")
+
+	// Configuration section
+	configLine := fmt.Sprintf("  Max Parallel Agents: %d", m.maxActive)
+	if m.configChanged {
+		configLine += " (modified)"
+	}
+	b.WriteString(moduleHeaderStyle.Render(configLine))
+	b.WriteString("\n")
+	b.WriteString(queuedStyle.Render("  Press [+] to increase, [-] to decrease (1-10)"))
+	b.WriteString("\n\n")
+
+	// Active agents section
+	b.WriteString(titleStyle.Render(fmt.Sprintf("RUNNING (%d/%d)", m.activeCount, m.maxActive)))
 	b.WriteString("\n")
 
 	if len(m.agents) == 0 {
-		b.WriteString(queuedStyle.Render("  No agents"))
-		return b.String()
+		b.WriteString(queuedStyle.Render("  No agents running"))
+		b.WriteString("\n")
+	} else {
+		for _, agent := range m.agents {
+			var statusIcon string
+			var style lipgloss.Style
+			switch agent.Status {
+			case "running":
+				statusIcon = "●"
+				style = runningStyle
+			case "completed":
+				statusIcon = "✓"
+				style = completedStyle
+			default:
+				statusIcon = "○"
+				style = queuedStyle
+			}
+
+			line := fmt.Sprintf("  %s %-15s %-25s %8s  %s",
+				statusIcon, agent.TaskID, truncate(agent.Title, 25),
+				formatDuration(agent.Duration), agent.Progress)
+			b.WriteString(style.Render(line))
+			b.WriteString("\n")
+		}
 	}
 
-	for _, agent := range m.agents {
-		var statusIcon string
-		var style lipgloss.Style
-		switch agent.Status {
-		case "running":
-			statusIcon = "●"
-			style = runningStyle
-		case "completed":
-			statusIcon = "✓"
-			style = completedStyle
-		default:
-			statusIcon = "○"
-			style = queuedStyle
-		}
-
-		line := fmt.Sprintf("  %s %-15s %-25s %8s  %s",
-			statusIcon, agent.TaskID, truncate(agent.Title, 25),
-			formatDuration(agent.Duration), agent.Progress)
-		b.WriteString(style.Render(line))
+	// Slots available
+	slotsAvailable := m.maxActive - m.activeCount
+	if slotsAvailable > 0 {
 		b.WriteString("\n")
+		b.WriteString(queuedStyle.Render(fmt.Sprintf("  %d slot(s) available for new agents", slotsAvailable)))
 	}
 
 	return strings.TrimSuffix(b.String(), "\n")
