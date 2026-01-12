@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 )
 
 // ViewMode determines how tasks are displayed
@@ -64,6 +65,10 @@ type Model struct {
 	agentManager    *executor.AgentManager
 	worktreeManager *executor.WorktreeManager
 
+	// Plan file watcher
+	planWatcher     *observer.PlanWatcher
+	planChangeChan  chan PlanSyncMsg
+
 	// Config state
 	configChanged bool
 
@@ -107,6 +112,8 @@ type ModelConfig struct {
 	AgentManager    *executor.AgentManager
 	WorktreeManager *executor.WorktreeManager
 	RecoveredAgents []*AgentView // Agents recovered from previous session
+	PlanWatcher     *observer.PlanWatcher
+	PlanChangeChan  chan PlanSyncMsg
 }
 
 // NewModel creates a new TUI model
@@ -157,8 +164,20 @@ func NewModel(cfg ModelConfig) Model {
 		worktreeDir:     cfg.WorktreeDir,
 		agentManager:    agentMgr,
 		worktreeManager: worktreeMgr,
+		planWatcher:     cfg.PlanWatcher,
+		planChangeChan:  cfg.PlanChangeChan,
 		statusMsg:       statusMsg,
 	}
+}
+
+// GetPlanChangeChan returns the channel for receiving plan change messages
+func (m Model) GetPlanChangeChan() chan PlanSyncMsg {
+	return m.planChangeChan
+}
+
+// GetPlanWatcher returns the plan watcher
+func (m Model) GetPlanWatcher() *observer.PlanWatcher {
+	return m.planWatcher
 }
 
 // computeModuleSummaries aggregates task data by module
@@ -213,9 +232,21 @@ func computeModuleSummaries(tasks []*domain.Task) []*ModuleSummary {
 
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		tickCmd(),
-	)
+	cmds := []tea.Cmd{tickCmd()}
+
+	// Start listening for plan changes if watcher is configured
+	if m.planChangeChan != nil {
+		cmds = append(cmds, waitForPlanChange(m.planChangeChan))
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// waitForPlanChange returns a command that waits for plan file changes
+func waitForPlanChange(ch chan PlanSyncMsg) tea.Cmd {
+	return func() tea.Msg {
+		return <-ch
+	}
 }
 
 // TickMsg triggers a refresh

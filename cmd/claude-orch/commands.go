@@ -10,6 +10,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/config"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
@@ -303,6 +304,38 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Create plan change channel for receiving file watcher notifications
+	planChangeChan := make(chan tui.PlanSyncMsg, 10)
+
+	// Create plan watcher that sends changes to the channel
+	planWatcher, err := observer.NewPlanWatcher(func(worktreePath string, changedFiles []string) {
+		// Non-blocking send to avoid deadlock if channel is full
+		select {
+		case planChangeChan <- tui.PlanSyncMsg{
+			WorktreePath: worktreePath,
+			ChangedFiles: changedFiles,
+		}:
+		default:
+			// Channel full, skip this notification
+		}
+	})
+	if err != nil {
+		fmt.Printf("Warning: failed to create plan watcher: %v\n", err)
+	}
+
+	// Start the watcher
+	if planWatcher != nil {
+		planWatcher.Start(ctx)
+		defer planWatcher.Stop()
+
+		// Add worktrees from recovered agents
+		for _, agent := range recoveredAgents {
+			if agent.WorktreePath != "" {
+				planWatcher.AddWorktree(agent.WorktreePath)
+			}
+		}
+	}
+
 	model := tui.NewModel(tui.ModelConfig{
 		MaxActive:       cfg.General.MaxParallelAgents,
 		AllTasks:        allTasks,
@@ -311,6 +344,8 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		WorktreeDir:     cfg.General.WorktreeDir,
 		AgentManager:    agentMgr,
 		RecoveredAgents: recoveredViews,
+		PlanWatcher:     planWatcher,
+		PlanChangeChan:  planChangeChan,
 	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen())

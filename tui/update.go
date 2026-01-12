@@ -9,12 +9,20 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/mcp"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
 )
 
 // TestCompleteMsg is sent when test execution completes
 type TestCompleteMsg struct {
 	Output string
 	Err    error
+}
+
+// PlanSyncMsg is sent when plan files change and need to be re-synced
+type PlanSyncMsg struct {
+	WorktreePath string
+	ChangedFiles []string
 }
 
 // AgentStartInfo holds info about an agent that was started
@@ -170,6 +178,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.queued[:count],
 						m.worktreeManager,
 						m.agentManager,
+						m.planWatcher,
 					)
 				} else if slotsAvailable == 0 {
 					m.statusMsg = "No agent slots available"
@@ -262,6 +271,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StatusUpdateMsg:
 		m.statusMsg = string(msg)
+		return m, nil
+
+	case PlanSyncMsg:
+		// Re-parse the changed plan files and update task data
+		updatedCount := 0
+		for _, filePath := range msg.ChangedFiles {
+			task, err := parser.ParseEpicFile(filePath)
+			if err != nil {
+				continue // Skip files that can't be parsed
+			}
+
+			// Find and update the matching task in our list
+			for i, t := range m.allTasks {
+				if t.ID.String() == task.ID.String() {
+					// Update task with new data from file
+					m.allTasks[i].Status = task.Status
+					m.allTasks[i].TestSummary = task.TestSummary
+					m.allTasks[i].NeedsReview = task.NeedsReview
+					updatedCount++
+					break
+				}
+			}
+		}
+
+		if updatedCount > 0 {
+			m.statusMsg = fmt.Sprintf("Updated %d task(s) from %s", updatedCount, msg.WorktreePath)
+			// Recompute module summaries from updated tasks
+			m.modules = computeModuleSummaries(m.allTasks)
+		}
+
+		// Continue listening for more changes
+		if m.planChangeChan != nil {
+			return m, waitForPlanChange(m.planChangeChan)
+		}
 		return m, nil
 
 	case BatchStartMsg:
@@ -473,6 +516,7 @@ func startBatchCmd(
 	tasks []*domain.Task,
 	wtMgr *executor.WorktreeManager,
 	agentMgr *executor.AgentManager,
+	planWatcher *observer.PlanWatcher,
 ) tea.Cmd {
 	return func() tea.Msg {
 		var started []AgentStartInfo
@@ -487,6 +531,10 @@ func startBatchCmd(
 				if err != nil {
 					errors = append(errors, fmt.Sprintf("%s: worktree: %v", task.ID.String(), err))
 					continue
+				}
+				// Add worktree to plan watcher
+				if planWatcher != nil {
+					planWatcher.AddWorktree(wtPath)
 				}
 			} else {
 				// No worktree manager - use project root directly (for testing)
