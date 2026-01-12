@@ -18,8 +18,8 @@ var (
 	epicFileRegex  = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)
 	moduleDirRegex = regexp.MustCompile(`^([a-z][a-z0-9-]*)-module$`)
 	titleRegex     = regexp.MustCompile(`^#\s+(.+)$`)
-	// Match table rows like: | E01 | 🟢 | or | E01 | Title | 🟢 |
-	readmeStatusRegex = regexp.MustCompile(`\|\s*E(\d+)\s*\|[^|]*([🔴🟡🟢])`)
+	// Match table rows like: | [E01](path) | Description | 🟢 | or | E01 | Title | 🟢 |
+	readmeStatusRegex = regexp.MustCompile(`\|\s*\[?E(\d+)\]?(?:\([^)]*\))?\s*\|.*([🔴🟡🟢])\s*\|`)
 )
 
 // ParseEpicFile parses a single epic markdown file into a Task
@@ -149,35 +149,67 @@ func ParsePlansDir(plansDir string) ([]*domain.Task, error) {
 func ParseReadmeStatuses(plansDir string) map[string]domain.TaskStatus {
 	statuses := make(map[string]domain.TaskStatus)
 
-	readmePath := filepath.Join(plansDir, "README.md")
-	content, err := os.ReadFile(readmePath)
+	// Try README.md in plansDir first, then parent directory
+	readmePaths := []string{
+		filepath.Join(plansDir, "README.md"),
+		filepath.Join(filepath.Dir(plansDir), "README.md"),
+	}
+
+	var content []byte
+	var err error
+	for _, p := range readmePaths {
+		content, err = os.ReadFile(p)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return statuses
 	}
 
 	lines := strings.Split(string(content), "\n")
-	currentModule := ""
 
-	// Pattern to match module headers like "## technical-module" or "## Technical Module"
-	moduleHeaderRegex := regexp.MustCompile(`^##\s+([a-zA-Z][a-zA-Z0-9-]*?)(?:-module|[\s-]Module)?(?:\s|$)`)
+	// Pattern to extract module from epic file path and status emoji
+	// Matches: | [E01](docs/plans/technical-module/epic-01-xxx.md) | Description | 🟢 |
+	// Or: | [E1](docs/plans/2026-01-05-subledger-epic-1-xxx.md) | Description | 🟢 |
+	epicPathRegex := regexp.MustCompile(`\|\s*\[E(\d+)\]\((?:[^)]*?/)?([a-z][a-z0-9-]*)-module/epic-\d+-[^)]+\.md\)`)
+	epicPathAltRegex := regexp.MustCompile(`\|\s*\[E(\d+)\]\((?:[^)]*?/)?\d{4}-\d{2}-\d{2}-([a-z][a-z0-9-]*)-epic-\d+-[^)]+\.md\)`)
 
 	for _, line := range lines {
-		// Check for module header
-		if matches := moduleHeaderRegex.FindStringSubmatch(line); matches != nil {
-			currentModule = strings.ToLower(matches[1])
+		// Skip lines without status emoji
+		if !strings.Contains(line, "🔴") && !strings.Contains(line, "🟡") && !strings.Contains(line, "🟢") {
 			continue
 		}
 
-		// Check for status emoji in table row
-		if currentModule != "" {
-			if matches := readmeStatusRegex.FindStringSubmatch(line); matches != nil {
-				epicNum, _ := strconv.Atoi(matches[1])
-				emoji := matches[2]
+		var module string
+		var epicNum int
 
-				taskID := domain.TaskID{Module: currentModule, EpicNum: epicNum}
-				statuses[taskID.String()] = emojiToStatus(emoji)
-			}
+		// Try to extract from path like "technical-module/epic-01-xxx.md"
+		if matches := epicPathRegex.FindStringSubmatch(line); matches != nil {
+			epicNum, _ = strconv.Atoi(matches[1])
+			module = matches[2]
+		} else if matches := epicPathAltRegex.FindStringSubmatch(line); matches != nil {
+			// Try alternate format like "2026-01-05-subledger-epic-1-xxx.md"
+			epicNum, _ = strconv.Atoi(matches[1])
+			module = matches[2]
 		}
+
+		if module == "" {
+			continue
+		}
+
+		// Extract the emoji
+		var emoji string
+		if strings.Contains(line, "🟢") {
+			emoji = "🟢"
+		} else if strings.Contains(line, "🟡") {
+			emoji = "🟡"
+		} else if strings.Contains(line, "🔴") {
+			emoji = "🔴"
+		}
+
+		taskID := domain.TaskID{Module: module, EpicNum: epicNum}
+		statuses[taskID.String()] = emojiToStatus(emoji)
 	}
 
 	return statuses
