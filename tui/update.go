@@ -11,6 +11,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/mcp"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 )
 
 // TestCompleteMsg is sent when test execution completes
@@ -189,17 +190,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == 0 && !m.batchRunning {
 				slotsAvailable := m.maxActive - m.activeCount
 				if slotsAvailable > 0 && len(m.queued) > 0 {
-					m.batchRunning = true
-					m.batchPaused = false
-					count := min(slotsAvailable, len(m.queued))
-					m.statusMsg = fmt.Sprintf("Starting batch: %d task(s)...", count)
-					return m, startBatchCmd(
-						m.projectRoot,
-						m.queued[:count],
-						m.worktreeManager,
-						m.agentManager,
-						m.planWatcher,
-					)
+					// Get in-progress task IDs from currently running agents
+					inProgress := make(map[string]bool)
+					for _, a := range m.agents {
+						if a.Status == executor.AgentRunning {
+							inProgress[a.TaskID] = true
+						}
+					}
+
+					// Use scheduler to select tasks that don't conflict with running agents
+					sched := scheduler.New(m.queued, m.completedTasks)
+					readyTasks := sched.GetReadyTasksExcluding(slotsAvailable, inProgress)
+
+					if len(readyTasks) > 0 {
+						m.batchRunning = true
+						m.batchPaused = false
+						m.statusMsg = fmt.Sprintf("Starting batch: %d task(s)...", len(readyTasks))
+						return m, startBatchCmd(
+							m.projectRoot,
+							readyTasks,
+							m.worktreeManager,
+							m.agentManager,
+							m.planWatcher,
+						)
+					} else {
+						m.statusMsg = "No independent tasks ready (dependencies pending)"
+					}
 				} else if slotsAvailable == 0 {
 					m.statusMsg = "No agent slots available"
 				} else {
@@ -312,6 +328,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.TaskID == msg.TaskID {
 				if msg.Success {
 					m.agents[i].Status = executor.AgentCompleted
+					// Mark task as completed for dependency tracking
+					if m.completedTasks == nil {
+						m.completedTasks = make(map[string]bool)
+					}
+					m.completedTasks[msg.TaskID] = true
 				} else {
 					m.agents[i].Status = executor.AgentFailed
 				}
@@ -474,6 +495,8 @@ func (m *Model) updateAgentsFromManager() {
 			continue
 		}
 
+		// Track status change to detect completions
+		prevStatus := av.Status
 		av.Status = agent.Status
 		av.Duration = agent.Duration()
 		av.WorktreePath = agent.WorktreePath
@@ -497,6 +520,14 @@ func (m *Model) updateAgentsFromManager() {
 		av.TokensInput = tokensIn
 		av.TokensOutput = tokensOut
 		av.CostUSD = cost
+
+		// Mark task as completed for dependency tracking when status changes to completed
+		if agent.Status == executor.AgentCompleted && prevStatus != executor.AgentCompleted {
+			if m.completedTasks == nil {
+				m.completedTasks = make(map[string]bool)
+			}
+			m.completedTasks[av.TaskID] = true
+		}
 
 		if agent.Status == executor.AgentRunning {
 			m.activeCount++

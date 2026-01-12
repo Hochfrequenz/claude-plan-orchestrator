@@ -33,11 +33,12 @@ type ModuleSummary struct {
 // Model is the TUI application model
 type Model struct {
 	// Data
-	agents   []*AgentView
-	queued   []*domain.Task
-	allTasks []*domain.Task
-	flagged  []*FlaggedPR
-	modules  []*ModuleSummary
+	agents         []*AgentView
+	queued         []*domain.Task
+	allTasks       []*domain.Task
+	flagged        []*FlaggedPR
+	modules        []*ModuleSummary
+	completedTasks map[string]bool // Track completed task IDs for dependency checking
 
 	// Stats
 	activeCount    int
@@ -138,6 +139,14 @@ func NewModel(cfg ModelConfig) Model {
 	// Compute module summaries
 	modules := computeModuleSummaries(cfg.AllTasks)
 
+	// Build completed tasks map from task status
+	completedTasks := make(map[string]bool)
+	for _, t := range cfg.AllTasks {
+		if t.Status == domain.StatusComplete {
+			completedTasks[t.ID.String()] = true
+		}
+	}
+
 	// Use provided managers or create defaults
 	agentMgr := cfg.AgentManager
 	if agentMgr == nil {
@@ -162,6 +171,7 @@ func NewModel(cfg ModelConfig) Model {
 		agents:          agents,
 		flagged:         cfg.Flagged,
 		modules:         modules,
+		completedTasks:  completedTasks,
 		activeCount:     activeCount,
 		activeTab:       0,
 		projectRoot:     cfg.ProjectRoot,
