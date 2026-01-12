@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -598,13 +599,23 @@ func (m Model) renderSelectedAgentDetail() string {
 	// Output section
 	if len(agent.Output) > 0 {
 		b.WriteString("\n")
-		b.WriteString(titleStyle.Render("  OUTPUT (last lines):"))
+		b.WriteString(titleStyle.Render("  OUTPUT (recent activity):"))
 		b.WriteString("\n")
-		for _, line := range agent.Output {
-			// Truncate long lines
-			if len(line) > 80 {
-				line = line[:77] + "..."
-			}
+
+		// Format the JSON output into readable lines
+		maxWidth := 80
+		if m.width > 10 {
+			maxWidth = m.width - 10
+		}
+		formattedLines := formatClaudeOutput(agent.Output, maxWidth)
+
+		// Show last N formatted lines
+		maxLines := 15
+		start := 0
+		if len(formattedLines) > maxLines {
+			start = len(formattedLines) - maxLines
+		}
+		for _, line := range formattedLines[start:] {
 			b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s", line)))
 			b.WriteString("\n")
 		}
@@ -638,6 +649,84 @@ func (m Model) renderPRs() string {
 	}
 
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// claudeStreamMessage represents a message from Claude's stream-json output
+type claudeStreamMessage struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype,omitempty"`
+	Message struct {
+		Content []struct {
+			Type      string `json:"type"`
+			Text      string `json:"text,omitempty"`
+			Name      string `json:"name,omitempty"`       // tool name
+			ToolInput any    `json:"input,omitempty"`      // tool input
+			ToolUseID string `json:"tool_use_id,omitempty"`
+		} `json:"content,omitempty"`
+	} `json:"message,omitempty"`
+}
+
+// formatClaudeOutput parses JSON stream lines and formats them for display
+func formatClaudeOutput(lines []string, maxWidth int) []string {
+	var result []string
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		var msg claudeStreamMessage
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			// Not valid JSON, show truncated raw line
+			if len(line) > maxWidth-4 {
+				line = line[:maxWidth-7] + "..."
+			}
+			result = append(result, line)
+			continue
+		}
+
+		switch msg.Type {
+		case "system":
+			// Skip most system messages, just show init
+			if msg.Subtype == "init" {
+				result = append(result, "▶ Session started")
+			}
+
+		case "assistant":
+			// Extract text content and tool uses
+			for _, content := range msg.Message.Content {
+				switch content.Type {
+				case "text":
+					// Split text into lines and add each
+					textLines := strings.Split(content.Text, "\n")
+					for _, tl := range textLines {
+						tl = strings.TrimSpace(tl)
+						if tl == "" {
+							continue
+						}
+						if len(tl) > maxWidth-4 {
+							tl = tl[:maxWidth-7] + "..."
+						}
+						result = append(result, tl)
+					}
+				case "tool_use":
+					// Show tool being used
+					toolLine := fmt.Sprintf("🔧 %s", content.Name)
+					result = append(result, toolLine)
+				}
+			}
+
+		case "user":
+			// Tool results - show a brief indicator
+			for _, content := range msg.Message.Content {
+				if content.Type == "tool_result" {
+					result = append(result, "   ↳ (tool result)")
+				}
+			}
+		}
+	}
+
+	return result
 }
 
 func (m Model) renderModules() string {
