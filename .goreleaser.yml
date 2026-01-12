@@ -30,9 +30,7 @@ builds:
       - -X main.date={{.Date}}
 
 archives:
-  - id: unix
-    formats:
-      - tar.gz
+  - id: default
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -44,30 +42,6 @@ archives:
       - README.md
       - LICENSE*
       - scripts/onboard.sh
-    rlcp: true
-    filter:
-      include:
-        - goos: linux
-        - goos: darwin
-
-  - id: windows
-    formats:
-      - zip
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- .Version }}_
-      {{- .Os }}_
-      {{- .Arch }}
-    builds:
-      - claude-orch
-    files:
-      - README.md
-      - LICENSE*
-      - scripts/onboard.sh
-    rlcp: true
-    filter:
-      include:
-        - goos: windows
 
 checksum:
   name_template: 'checksums.txt'
