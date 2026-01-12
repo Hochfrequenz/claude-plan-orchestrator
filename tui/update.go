@@ -175,6 +175,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.maxActive < 10 {
 					m.maxActive++
 					m.configChanged = true
+					// Sync with agent manager
+					if m.agentManager != nil {
+						m.agentManager.SetMaxConcurrent(m.maxActive)
+					}
 				}
 			}
 		case "-", "_":
@@ -183,6 +187,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.maxActive > 1 {
 					m.maxActive--
 					m.configChanged = true
+					// Sync with agent manager
+					if m.agentManager != nil {
+						m.agentManager.SetMaxConcurrent(m.maxActive)
+					}
 				}
 			}
 		case "s":

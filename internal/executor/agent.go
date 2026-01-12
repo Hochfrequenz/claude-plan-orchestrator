@@ -102,6 +102,20 @@ func (m *AgentManager) SetStore(store AgentStore) {
 	m.store = store
 }
 
+// SetMaxConcurrent updates the maximum number of concurrent agents
+func (m *AgentManager) SetMaxConcurrent(max int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.maxConcurrent = max
+}
+
+// GetMaxConcurrent returns the maximum number of concurrent agents
+func (m *AgentManager) GetMaxConcurrent() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.maxConcurrent
+}
+
 // Add adds an agent to the manager and persists it
 func (m *AgentManager) Add(agent *Agent) {
 	m.mu.Lock()
