@@ -42,6 +42,7 @@ type Agent struct {
 	Prompt       string
 	Output       []string
 	Error        error
+	SessionID    string // Claude Code session ID for resume capability
 
 	// Token usage from Claude session
 	TokensInput  int
@@ -76,6 +77,7 @@ type AgentRunRecord struct {
 	StartedAt    time.Time
 	FinishedAt   *time.Time
 	ErrorMessage string
+	SessionID    string // Claude Code session ID for resume capability
 	TokensInput  int
 	TokensOutput int
 	CostUSD      float64
@@ -136,6 +138,7 @@ func (m *AgentManager) Add(agent *Agent) {
 			PID:          agent.PID,
 			Status:       string(agent.Status),
 			StartedAt:    startedAt,
+			SessionID:    agent.SessionID,
 		})
 	}
 }
@@ -233,6 +236,12 @@ func (a *Agent) Start(ctx context.Context) error {
 		a.ID = fmt.Sprintf("%s-%d", a.TaskID.String(), time.Now().UnixNano())
 	}
 
+	// Generate session ID for Claude Code resume capability
+	// Use a stable name based on task ID so we can resume later
+	if a.SessionID == "" {
+		a.SessionID = fmt.Sprintf("orch-%s", a.TaskID.String())
+	}
+
 	// Create log file in worktree
 	a.LogPath = filepath.Join(a.WorktreePath, ".claude-agent.log")
 	logFile, err := os.Create(a.LogPath)
@@ -250,6 +259,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		"--verbose",                      // Required for stream-json output
 		"--dangerously-skip-permissions", // Skip permission prompts
 		"--output-format", "stream-json", // Stream output as JSON for realtime updates
+		"--session-id", a.SessionID,      // Named session for resume capability
 		"-p", a.Prompt,                   // Pass prompt as argument
 	)
 	a.cmd.Dir = a.WorktreePath
@@ -346,6 +356,80 @@ func (a *Agent) streamOutput(stdout, stderr io.ReadCloser) {
 	if callback != nil {
 		callback(a, newStatus, errMsg)
 	}
+}
+
+// Resume restarts the agent by resuming its Claude Code session
+// This continues from where the previous session left off
+func (a *Agent) Resume(ctx context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Can only resume completed or failed agents
+	if a.Status != AgentCompleted && a.Status != AgentFailed {
+		return fmt.Errorf("can only resume completed or failed agents, current status: %s", a.Status)
+	}
+
+	// Must have a session ID to resume
+	if a.SessionID == "" {
+		// Generate one based on task ID for backwards compatibility
+		a.SessionID = fmt.Sprintf("orch-%s", a.TaskID.String())
+	}
+
+	// Re-open or create log file (append mode)
+	logPath := filepath.Join(a.WorktreePath, ".claude-agent.log")
+	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("opening log file: %w", err)
+	}
+	a.logFile = logFile
+	a.LogPath = logPath
+
+	// Add resume marker to log
+	logFile.WriteString(fmt.Sprintf("\n=== Session resumed at %s ===\n", time.Now().Format(time.RFC3339)))
+
+	ctx, cancel := context.WithCancel(ctx)
+	a.cancel = cancel
+
+	// Build claude command with --resume to continue the session
+	a.cmd = exec.CommandContext(ctx, "claude",
+		"--print",                        // Non-interactive mode
+		"--verbose",                      // Required for stream-json output
+		"--dangerously-skip-permissions", // Skip permission prompts
+		"--output-format", "stream-json", // Stream output as JSON for realtime updates
+		"--resume", a.SessionID,          // Resume the named session
+	)
+	a.cmd.Dir = a.WorktreePath
+
+	// Capture output
+	stdout, err := a.cmd.StdoutPipe()
+	if err != nil {
+		a.logFile.Close()
+		return err
+	}
+	stderr, err := a.cmd.StderrPipe()
+	if err != nil {
+		a.logFile.Close()
+		return err
+	}
+
+	// Start the process
+	if err := a.cmd.Start(); err != nil {
+		a.logFile.Close()
+		return fmt.Errorf("starting claude: %w", err)
+	}
+
+	// Update state
+	a.PID = a.cmd.Process.Pid
+	now := time.Now()
+	a.StartedAt = &now
+	a.FinishedAt = nil
+	a.Status = AgentRunning
+	a.Error = nil
+
+	// Stream output in background
+	go a.streamOutput(stdout, stderr)
+
+	return nil
 }
 
 // Stop gracefully stops the agent
@@ -553,6 +637,7 @@ func (m *AgentManager) RecoverAgents(ctx context.Context) ([]*Agent, error) {
 			LogPath:      run.LogPath,
 			PID:          run.PID,
 			StartedAt:    &run.StartedAt,
+			SessionID:    run.SessionID,
 		}
 
 		// Check if process is still running

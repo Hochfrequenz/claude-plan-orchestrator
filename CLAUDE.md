@@ -27,6 +27,14 @@ Claude Plan Orchestrator is an autonomous development orchestrator that manages 
 ./scripts/check-deps.sh --install
 ```
 
+## Go Installation
+
+Go is installed at `/home/claude/.local/go/bin/go`. If `go` is not in your PATH, use the full path or add to PATH:
+
+```bash
+export PATH="$HOME/.local/go/bin:$PATH"
+```
+
 ## Build Commands
 
 ```bash

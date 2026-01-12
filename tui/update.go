@@ -62,6 +62,13 @@ type AgentCompleteMsg struct {
 	Output  string
 }
 
+// AgentResumeMsg is sent when an agent resume completes
+type AgentResumeMsg struct {
+	TaskID  string
+	Success bool
+	Error   string
+}
+
 // Update handles messages
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -69,8 +76,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "r":
-			return m, tickCmd()
 		case "j", "down":
 			m.selectedRow++
 			if m.activeTab == 1 {
@@ -141,6 +146,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == 2 {
 				m.showAgentDetail = false
 				m.agentOutputScroll = 0
+			}
+		case "r":
+			// Resume/restart selected agent (only on Agents tab)
+			if m.activeTab == 2 && len(m.agents) > 0 && m.selectedAgent < len(m.agents) {
+				av := m.agents[m.selectedAgent]
+				// Can only resume completed or failed agents
+				if av.Status == executor.AgentCompleted || av.Status == executor.AgentFailed {
+					m.statusMsg = fmt.Sprintf("Resuming agent %s...", av.TaskID)
+					return m, resumeAgentCmd(m.agentManager, av.TaskID)
+				} else if av.Status == executor.AgentRunning {
+					m.statusMsg = "Agent is already running"
+				} else {
+					m.statusMsg = "Cannot resume agent in this state"
+				}
 			}
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % 5
@@ -374,6 +393,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.testOutput = "Error: " + msg.Err.Error()
 		} else {
 			m.testOutput = msg.Output
+		}
+		return m, nil
+
+	case AgentResumeMsg:
+		if msg.Success {
+			// Update agent view status
+			for i, a := range m.agents {
+				if a.TaskID == msg.TaskID {
+					m.agents[i].Status = executor.AgentRunning
+					m.activeCount++
+					break
+				}
+			}
+			m.statusMsg = fmt.Sprintf("Resumed agent %s", msg.TaskID)
+			m.batchRunning = true // Re-enable batch tracking
+		} else {
+			m.statusMsg = fmt.Sprintf("Failed to resume %s: %s", msg.TaskID, msg.Error)
 		}
 		return m, nil
 
@@ -718,4 +754,40 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// resumeAgentCmd creates a command to resume an agent
+func resumeAgentCmd(agentMgr *executor.AgentManager, taskID string) tea.Cmd {
+	return func() tea.Msg {
+		if agentMgr == nil {
+			return AgentResumeMsg{
+				TaskID:  taskID,
+				Success: false,
+				Error:   "no agent manager",
+			}
+		}
+
+		agent := agentMgr.Get(taskID)
+		if agent == nil {
+			return AgentResumeMsg{
+				TaskID:  taskID,
+				Success: false,
+				Error:   "agent not found",
+			}
+		}
+
+		// Resume the agent
+		if err := agent.Resume(context.Background()); err != nil {
+			return AgentResumeMsg{
+				TaskID:  taskID,
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+
+		return AgentResumeMsg{
+			TaskID:  taskID,
+			Success: true,
+		}
+	}
 }

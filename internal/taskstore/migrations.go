@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     finished_at TIMESTAMP,
     error_message TEXT,
+    session_id TEXT,
     tokens_input INTEGER DEFAULT 0,
     tokens_output INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT 0.0
@@ -81,4 +82,9 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_task_id ON agent_runs(task_id);
+`
+
+// Migration to add session_id column to existing databases
+const migrationAddSessionID = `
+ALTER TABLE agent_runs ADD COLUMN session_id TEXT;
 `

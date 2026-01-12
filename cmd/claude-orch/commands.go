@@ -425,6 +425,7 @@ func (a *agentStoreAdapter) SaveAgentRun(run *executor.AgentRunRecord) error {
 		StartedAt:    run.StartedAt,
 		FinishedAt:   run.FinishedAt,
 		ErrorMessage: run.ErrorMessage,
+		SessionID:    run.SessionID,
 	})
 }
 
@@ -449,6 +450,7 @@ func (a *agentStoreAdapter) ListActiveAgentRuns() ([]*executor.AgentRunRecord, e
 			StartedAt:    run.StartedAt,
 			FinishedAt:   run.FinishedAt,
 			ErrorMessage: run.ErrorMessage,
+			SessionID:    run.SessionID,
 		}
 	}
 	return result, nil

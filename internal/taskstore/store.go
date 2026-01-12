@@ -32,6 +32,9 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
+	// Run additional migrations (ignore errors for already-applied migrations)
+	db.Exec(migrationAddSessionID)
+
 	return &Store{db: db}, nil
 }
 
@@ -223,6 +226,7 @@ type AgentRun struct {
 	StartedAt    time.Time
 	FinishedAt   *time.Time
 	ErrorMessage string
+	SessionID    string // Claude Code session ID for resume capability
 	TokensInput  int
 	TokensOutput int
 	CostUSD      float64
@@ -231,12 +235,13 @@ type AgentRun struct {
 // SaveAgentRun creates or updates an agent run record
 func (s *Store) SaveAgentRun(run *AgentRun) error {
 	_, err := s.db.Exec(`
-		INSERT INTO agent_runs (id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO agent_runs (id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message, session_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			status = excluded.status,
 			finished_at = excluded.finished_at,
-			error_message = excluded.error_message
+			error_message = excluded.error_message,
+			session_id = excluded.session_id
 	`,
 		run.ID,
 		run.TaskID,
@@ -247,6 +252,7 @@ func (s *Store) SaveAgentRun(run *AgentRun) error {
 		run.StartedAt,
 		run.FinishedAt,
 		run.ErrorMessage,
+		run.SessionID,
 	)
 	return err
 }
@@ -254,7 +260,7 @@ func (s *Store) SaveAgentRun(run *AgentRun) error {
 // GetAgentRun retrieves an agent run by ID
 func (s *Store) GetAgentRun(id string) (*AgentRun, error) {
 	row := s.db.QueryRow(`
-		SELECT id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message
+		SELECT id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message, COALESCE(session_id, '')
 		FROM agent_runs WHERE id = ?
 	`, id)
 
@@ -262,7 +268,7 @@ func (s *Store) GetAgentRun(id string) (*AgentRun, error) {
 	var finishedAt sql.NullTime
 	var errorMsg sql.NullString
 
-	err := row.Scan(&run.ID, &run.TaskID, &run.WorktreePath, &run.LogPath, &run.PID, &run.Status, &run.StartedAt, &finishedAt, &errorMsg)
+	err := row.Scan(&run.ID, &run.TaskID, &run.WorktreePath, &run.LogPath, &run.PID, &run.Status, &run.StartedAt, &finishedAt, &errorMsg, &run.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +286,7 @@ func (s *Store) GetAgentRun(id string) (*AgentRun, error) {
 // ListActiveAgentRuns returns all agent runs that are still running
 func (s *Store) ListActiveAgentRuns() ([]*AgentRun, error) {
 	rows, err := s.db.Query(`
-		SELECT id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message
+		SELECT id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message, COALESCE(session_id, '')
 		FROM agent_runs WHERE status = 'running'
 	`)
 	if err != nil {
@@ -294,7 +300,7 @@ func (s *Store) ListActiveAgentRuns() ([]*AgentRun, error) {
 		var finishedAt sql.NullTime
 		var errorMsg sql.NullString
 
-		err := rows.Scan(&run.ID, &run.TaskID, &run.WorktreePath, &run.LogPath, &run.PID, &run.Status, &run.StartedAt, &finishedAt, &errorMsg)
+		err := rows.Scan(&run.ID, &run.TaskID, &run.WorktreePath, &run.LogPath, &run.PID, &run.Status, &run.StartedAt, &finishedAt, &errorMsg, &run.SessionID)
 		if err != nil {
 			return nil, err
 		}
