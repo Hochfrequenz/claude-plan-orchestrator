@@ -41,6 +41,7 @@ func ParseEpicFile(path string) (*domain.Task, error) {
 
 	title := extractTitle(body)
 	description := extractDescription(body)
+	testSummary := ExtractTestSummary(content)
 
 	deps, err := ParseDependencies(fm.DependsOn)
 	if err != nil {
@@ -57,6 +58,7 @@ func ParseEpicFile(path string) (*domain.Task, error) {
 		DependsOn:   deps,
 		NeedsReview: fm.NeedsReview,
 		FilePath:    path,
+		TestSummary: testSummary,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}, nil
@@ -288,4 +290,88 @@ func extractDescription(content []byte) string {
 	}
 
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// ExtractTestSummary parses the "## Test Summary" section from epic content
+func ExtractTestSummary(content []byte) *domain.TestSummary {
+	lines := strings.Split(string(content), "\n")
+
+	// Find "## Test Summary" section
+	inTestSummary := false
+	inTable := false
+	inFilesList := false
+
+	summary := &domain.TestSummary{}
+	hasData := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check for Test Summary header
+		if strings.HasPrefix(trimmed, "## Test Summary") || strings.HasPrefix(trimmed, "## Test Results") {
+			inTestSummary = true
+			continue
+		}
+
+		// Exit on next section
+		if inTestSummary && strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+
+		if !inTestSummary {
+			continue
+		}
+
+		// Check for table header
+		if strings.Contains(trimmed, "| Metric") || strings.Contains(trimmed, "|---") {
+			inTable = true
+			continue
+		}
+
+		// Check for files list
+		if strings.Contains(strings.ToLower(trimmed), "files tested") {
+			inFilesList = true
+			inTable = false
+			continue
+		}
+
+		// Parse table rows
+		if inTable && strings.HasPrefix(trimmed, "|") {
+			parts := strings.Split(trimmed, "|")
+			if len(parts) >= 3 {
+				metric := strings.TrimSpace(parts[1])
+				value := strings.TrimSpace(parts[2])
+
+				switch strings.ToLower(metric) {
+				case "tests", "total":
+					summary.Tests, _ = strconv.Atoi(value)
+					hasData = true
+				case "passed":
+					summary.Passed, _ = strconv.Atoi(value)
+					hasData = true
+				case "failed":
+					summary.Failed, _ = strconv.Atoi(value)
+					hasData = true
+				case "skipped":
+					summary.Skipped, _ = strconv.Atoi(value)
+					hasData = true
+				case "coverage":
+					summary.Coverage = value
+					hasData = true
+				}
+			}
+		}
+
+		// Parse files list
+		if inFilesList && strings.HasPrefix(trimmed, "- ") {
+			file := strings.TrimPrefix(trimmed, "- ")
+			summary.FilesTested = append(summary.FilesTested, file)
+			hasData = true
+		}
+	}
+
+	if !hasData {
+		return nil
+	}
+	return summary
 }

@@ -18,15 +18,34 @@ Instructions:
 2. Implement the epic requirements
 3. Run tests to verify your implementation
 4. Ensure all tests pass
-5. When complete, update the epic file's frontmatter to set status: complete
+5. When complete, update the epic file:
+   a. Set frontmatter status: complete
+   b. Add a "## Test Summary" section at the end with test results
 6. Update the README.md in the plans directory: change the status emoji for this epic from 🔴 or 🟡 to 🟢
 7. Create a summary of changes made
 
-Status update format in epic frontmatter:
+Epic file format when complete:
 ---
 status: complete
 priority: ...
 ---
+
+# Epic Title
+... epic content ...
+
+## Test Summary
+
+| Metric | Value |
+|--------|-------|
+| Tests | 42 |
+| Passed | 42 |
+| Failed | 0 |
+| Skipped | 0 |
+| Coverage | 85%% |
+
+Files tested:
+- path/to/file1.go
+- path/to/file2.go
 
 Do not ask for clarification. Make reasonable decisions based on the epic content.
 `

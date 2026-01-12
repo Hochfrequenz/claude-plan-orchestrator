@@ -30,6 +30,16 @@ func (t TaskID) String() string {
 	return fmt.Sprintf("%s/E%02d", t.Module, t.EpicNum)
 }
 
+// TestSummary holds test execution results for a completed epic
+type TestSummary struct {
+	Tests      int      `json:"tests"`
+	Passed     int      `json:"passed"`
+	Failed     int      `json:"failed"`
+	Skipped    int      `json:"skipped"`
+	Coverage   string   `json:"coverage,omitempty"`
+	FilesTested []string `json:"files_tested,omitempty"`
+}
+
 // Task represents a unit of work parsed from an epic markdown file
 type Task struct {
 	ID          TaskID
@@ -40,6 +50,7 @@ type Task struct {
 	DependsOn   []TaskID
 	NeedsReview bool
 	FilePath    string
+	TestSummary *TestSummary
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
