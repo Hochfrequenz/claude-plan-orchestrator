@@ -13,28 +13,60 @@ An autonomous development orchestrator that manages Claude Code agents working o
 - **Notifications**: Desktop notifications and Slack webhook integration
 - **Scheduled Batches**: Cron-based batch execution for overnight runs
 
+## Quick Start
+
+```bash
+# Install (no compilation required)
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/install.sh | bash
+
+# Set up a new project
+erp-orch onboard
+```
+
 ## Installation
 
-### Prerequisites
+### Option 1: Quick Install (Recommended)
 
-- Go 1.21+
-- Git
-- Claude Code CLI (`claude`)
-- Node.js 18+ (for Web UI development)
+Download a pre-built binary with a single command:
 
-### Build from Source
+```bash
+# Install latest version
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/install.sh | bash
+
+# Install specific version
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/install.sh | bash -s -- v1.0.0
+
+# Custom install directory
+INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/install.sh | bash
+```
+
+### Option 2: Homebrew (macOS/Linux)
+
+```bash
+brew tap hochfrequenz/tap
+brew install erp-orch
+```
+
+### Option 3: Build from Source
+
+Prerequisites: Go 1.21+
 
 ```bash
 # Clone the repository
-git clone https://github.com/anthropics/erp-orchestrator.git
+git clone https://github.com/hochfrequenz/erp-orchestrator.git
 cd erp-orchestrator
 
 # Build the CLI
 go build -o erp-orch ./cmd/erp-orch
 
-# Optional: Install to PATH
-sudo mv erp-orch /usr/local/bin/
+# Install to PATH
+mv erp-orch ~/.local/bin/
 ```
+
+### Prerequisites
+
+- Git
+- Claude Code CLI (`claude`) - required for agent execution
 
 ### Check Dependencies
 
@@ -47,6 +79,27 @@ sudo mv erp-orch /usr/local/bin/
 
 # Install missing dependencies (system-wide)
 ./scripts/check-deps.sh --install
+```
+
+## Project Onboarding
+
+Set up erp-orch for a new project with the interactive wizard:
+
+```bash
+erp-orch onboard
+```
+
+This will:
+1. Check prerequisites (git, claude CLI)
+2. Create configuration file (~/.config/erp-orchestrator/config.toml)
+3. Set up plans directory structure (docs/plans/)
+4. Create a sample plan file
+5. Run initial task sync
+
+Alternatively, run the standalone onboarding script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/onboard.sh | bash
 ```
 
 ## Configuration

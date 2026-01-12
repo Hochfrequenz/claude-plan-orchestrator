@@ -1,0 +1,84 @@
+# GoReleaser configuration for ERP Orchestrator
+# Run: goreleaser release --clean
+# Or for testing: goreleaser build --snapshot --clean
+
+version: 2
+
+project_name: erp-orch
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: erp-orch
+    main: ./cmd/erp-orch
+    binary: erp-orch
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE*
+      - scripts/onboard.sh
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: hochfrequenz
+    name: erp-orchestrator
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+
+brews:
+  - name: erp-orch
+    repository:
+      owner: hochfrequenz
+      name: homebrew-tap
+    folder: Formula
+    homepage: "https://github.com/hochfrequenz/erp-orchestrator"
+    description: "Autonomous development orchestrator for Claude Code agents"
+    license: "MIT"
+    install: |
+      bin.install "erp-orch"
+    test: |
+      system "#{bin}/erp-orch", "--version"
