@@ -23,11 +23,11 @@
 | 4.1 Create Worktree Manager | DONE |
 | 4.2 Create Agent Spawner | DONE |
 | 5.1 Create PR Bot | DONE |
-| 6.1 Create Observer | TODO |
-| 6.2 Create CLI | TODO |
-| 7.1 Create TUI Model | TODO |
+| 6.1 Create Observer | DONE |
+| 6.2 Create CLI | DONE |
+| 7.1 Create TUI Model | DONE |
 
-**Next task to implement:** Task 6.1: Create Observer
+**All tasks complete!**
 
 ---
 
