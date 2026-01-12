@@ -9,6 +9,7 @@ import (
 
 // Frontmatter represents the YAML frontmatter in epic files
 type Frontmatter struct {
+	Status      string   `yaml:"status"`
 	Priority    string   `yaml:"priority"`
 	DependsOn   []string `yaml:"depends_on"`
 	NeedsReview bool     `yaml:"needs_review"`
@@ -61,5 +62,17 @@ func ToPriority(s string) domain.Priority {
 		return domain.PriorityLow
 	default:
 		return domain.PriorityNormal
+	}
+}
+
+// ToStatus converts a string to a TaskStatus
+func ToStatus(s string) domain.TaskStatus {
+	switch s {
+	case "in_progress", "inprogress", "in-progress", "running":
+		return domain.StatusInProgress
+	case "complete", "completed", "done":
+		return domain.StatusComplete
+	default:
+		return domain.StatusNotStarted
 	}
 }

@@ -50,7 +50,7 @@ func ParseEpicFile(path string) (*domain.Task, error) {
 		ID:          taskID,
 		Title:       title,
 		Description: description,
-		Status:      domain.StatusNotStarted,
+		Status:      ToStatus(fm.Status),
 		Priority:    ToPriority(fm.Priority),
 		DependsOn:   deps,
 		NeedsReview: fm.NeedsReview,
