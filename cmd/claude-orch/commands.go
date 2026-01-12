@@ -1,18 +1,20 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"text/tabwriter"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/config"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
 	"github.com/hochfrequenz/claude-plan-orchestrator/tui"
 	"github.com/hochfrequenz/claude-plan-orchestrator/web/api"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -276,12 +278,39 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	// Load queued tasks (not started)
 	queued, _ := store.ListTasks(taskstore.ListOptions{Status: domain.StatusNotStarted})
 
+	// Create agent manager with persistence
+	agentMgr := executor.NewAgentManager(cfg.General.MaxParallelAgents)
+	agentStoreAdp := &agentStoreAdapter{store: store}
+	agentMgr.SetStore(agentStoreAdp)
+
+	// Recover any agents that were running before
+	ctx := context.Background()
+	recoveredAgents, err := agentMgr.RecoverAgents(ctx)
+	if err != nil {
+		fmt.Printf("Warning: failed to recover agents: %v\n", err)
+	}
+
+	// Convert recovered agents to AgentViews for TUI
+	var recoveredViews []*tui.AgentView
+	for _, agent := range recoveredAgents {
+		recoveredViews = append(recoveredViews, &tui.AgentView{
+			TaskID:       agent.TaskID.String(),
+			Title:        agent.TaskID.String(), // Will be updated with actual title
+			Status:       agent.Status,
+			Duration:     agent.Duration(),
+			WorktreePath: agent.WorktreePath,
+			Output:       agent.GetOutput(),
+		})
+	}
+
 	model := tui.NewModel(tui.ModelConfig{
-		MaxActive:   cfg.General.MaxParallelAgents,
-		AllTasks:    allTasks,
-		Queued:      queued,
-		ProjectRoot: cfg.General.ProjectRoot,
-		WorktreeDir: cfg.General.WorktreeDir,
+		MaxActive:       cfg.General.MaxParallelAgents,
+		AllTasks:        allTasks,
+		Queued:          queued,
+		ProjectRoot:     cfg.General.ProjectRoot,
+		WorktreeDir:     cfg.General.WorktreeDir,
+		AgentManager:    agentMgr,
+		RecoveredAgents: recoveredViews,
 	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
@@ -318,6 +347,55 @@ func (a *storeAdapter) ListTasks(opts interface{}) ([]*domain.Task, error) {
 
 func (a *storeAdapter) GetTask(id string) (*domain.Task, error) {
 	return a.store.GetTask(id)
+}
+
+// agentStoreAdapter wraps taskstore.Store to implement executor.AgentStore
+type agentStoreAdapter struct {
+	store *taskstore.Store
+}
+
+func (a *agentStoreAdapter) SaveAgentRun(run *executor.AgentRunRecord) error {
+	return a.store.SaveAgentRun(&taskstore.AgentRun{
+		ID:           run.ID,
+		TaskID:       run.TaskID,
+		WorktreePath: run.WorktreePath,
+		LogPath:      run.LogPath,
+		PID:          run.PID,
+		Status:       run.Status,
+		StartedAt:    run.StartedAt,
+		FinishedAt:   run.FinishedAt,
+		ErrorMessage: run.ErrorMessage,
+	})
+}
+
+func (a *agentStoreAdapter) UpdateAgentRunStatus(id string, status string, errorMessage string) error {
+	return a.store.UpdateAgentRunStatus(id, status, errorMessage)
+}
+
+func (a *agentStoreAdapter) ListActiveAgentRuns() ([]*executor.AgentRunRecord, error) {
+	runs, err := a.store.ListActiveAgentRuns()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*executor.AgentRunRecord, len(runs))
+	for i, run := range runs {
+		result[i] = &executor.AgentRunRecord{
+			ID:           run.ID,
+			TaskID:       run.TaskID,
+			WorktreePath: run.WorktreePath,
+			LogPath:      run.LogPath,
+			PID:          run.PID,
+			Status:       run.Status,
+			StartedAt:    run.StartedAt,
+			FinishedAt:   run.FinishedAt,
+			ErrorMessage: run.ErrorMessage,
+		}
+	}
+	return result, nil
+}
+
+func (a *agentStoreAdapter) DeleteAgentRun(id string) error {
+	return a.store.DeleteAgentRun(id)
 }
 
 func runServe(cmd *cobra.Command, args []string) error {

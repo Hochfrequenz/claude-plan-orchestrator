@@ -106,13 +106,20 @@ type ModelConfig struct {
 	WorktreeDir     string
 	AgentManager    *executor.AgentManager
 	WorktreeManager *executor.WorktreeManager
+	RecoveredAgents []*AgentView // Agents recovered from previous session
 }
 
 // NewModel creates a new TUI model
 func NewModel(cfg ModelConfig) Model {
+	// Merge recovered agents with any provided agents
+	agents := cfg.Agents
+	if len(cfg.RecoveredAgents) > 0 {
+		agents = append(agents, cfg.RecoveredAgents...)
+	}
+
 	activeCount := 0
-	for _, a := range cfg.Agents {
-		if a.Status == "running" {
+	for _, a := range agents {
+		if a.Status == executor.AgentRunning {
 			activeCount++
 		}
 	}
@@ -131,11 +138,17 @@ func NewModel(cfg ModelConfig) Model {
 		worktreeMgr = executor.NewWorktreeManager(cfg.ProjectRoot, cfg.WorktreeDir)
 	}
 
+	// Set status message if we recovered agents
+	statusMsg := ""
+	if len(cfg.RecoveredAgents) > 0 {
+		statusMsg = fmt.Sprintf("Recovered %d agent(s) from previous session", len(cfg.RecoveredAgents))
+	}
+
 	return Model{
 		maxActive:       cfg.MaxActive,
 		allTasks:        cfg.AllTasks,
 		queued:          cfg.Queued,
-		agents:          cfg.Agents,
+		agents:          agents,
 		flagged:         cfg.Flagged,
 		modules:         modules,
 		activeCount:     activeCount,
@@ -144,6 +157,7 @@ func NewModel(cfg ModelConfig) Model {
 		worktreeDir:     cfg.WorktreeDir,
 		agentManager:    agentMgr,
 		worktreeManager: worktreeMgr,
+		statusMsg:       statusMsg,
 	}
 }
 

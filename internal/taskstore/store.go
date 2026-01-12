@@ -211,3 +211,120 @@ func scanTaskRows(rows *sql.Rows) (*domain.Task, error) {
 
 	return &task, nil
 }
+
+// AgentRun represents a running or completed agent execution
+type AgentRun struct {
+	ID           string
+	TaskID       string
+	WorktreePath string
+	LogPath      string
+	PID          int
+	Status       string // "running", "completed", "failed"
+	StartedAt    time.Time
+	FinishedAt   *time.Time
+	ErrorMessage string
+}
+
+// SaveAgentRun creates or updates an agent run record
+func (s *Store) SaveAgentRun(run *AgentRun) error {
+	_, err := s.db.Exec(`
+		INSERT INTO agent_runs (id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			status = excluded.status,
+			finished_at = excluded.finished_at,
+			error_message = excluded.error_message
+	`,
+		run.ID,
+		run.TaskID,
+		run.WorktreePath,
+		run.LogPath,
+		run.PID,
+		run.Status,
+		run.StartedAt,
+		run.FinishedAt,
+		run.ErrorMessage,
+	)
+	return err
+}
+
+// GetAgentRun retrieves an agent run by ID
+func (s *Store) GetAgentRun(id string) (*AgentRun, error) {
+	row := s.db.QueryRow(`
+		SELECT id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message
+		FROM agent_runs WHERE id = ?
+	`, id)
+
+	var run AgentRun
+	var finishedAt sql.NullTime
+	var errorMsg sql.NullString
+
+	err := row.Scan(&run.ID, &run.TaskID, &run.WorktreePath, &run.LogPath, &run.PID, &run.Status, &run.StartedAt, &finishedAt, &errorMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	if finishedAt.Valid {
+		run.FinishedAt = &finishedAt.Time
+	}
+	if errorMsg.Valid {
+		run.ErrorMessage = errorMsg.String
+	}
+
+	return &run, nil
+}
+
+// ListActiveAgentRuns returns all agent runs that are still running
+func (s *Store) ListActiveAgentRuns() ([]*AgentRun, error) {
+	rows, err := s.db.Query(`
+		SELECT id, task_id, worktree_path, log_path, pid, status, started_at, finished_at, error_message
+		FROM agent_runs WHERE status = 'running'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []*AgentRun
+	for rows.Next() {
+		var run AgentRun
+		var finishedAt sql.NullTime
+		var errorMsg sql.NullString
+
+		err := rows.Scan(&run.ID, &run.TaskID, &run.WorktreePath, &run.LogPath, &run.PID, &run.Status, &run.StartedAt, &finishedAt, &errorMsg)
+		if err != nil {
+			return nil, err
+		}
+
+		if finishedAt.Valid {
+			run.FinishedAt = &finishedAt.Time
+		}
+		if errorMsg.Valid {
+			run.ErrorMessage = errorMsg.String
+		}
+
+		runs = append(runs, &run)
+	}
+
+	return runs, rows.Err()
+}
+
+// UpdateAgentRunStatus updates the status of an agent run
+func (s *Store) UpdateAgentRunStatus(id string, status string, errorMessage string) error {
+	var finishedAt *time.Time
+	if status == "completed" || status == "failed" {
+		now := time.Now()
+		finishedAt = &now
+	}
+
+	_, err := s.db.Exec(`
+		UPDATE agent_runs SET status = ?, finished_at = ?, error_message = ? WHERE id = ?
+	`, status, finishedAt, errorMessage, id)
+	return err
+}
+
+// DeleteAgentRun removes an agent run record
+func (s *Store) DeleteAgentRun(id string) error {
+	_, err := s.db.Exec(`DELETE FROM agent_runs WHERE id = ?`, id)
+	return err
+}

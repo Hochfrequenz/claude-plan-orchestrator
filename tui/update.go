@@ -496,7 +496,7 @@ func startBatchCmd(
 			// Build prompt for the agent
 			prompt := executor.BuildPrompt(task, task.Description, "", nil)
 
-			// Create and register the agent
+			// Create the agent with status callback for persistence
 			agent := &executor.Agent{
 				TaskID:       task.ID,
 				WorktreePath: wtPath,
@@ -504,14 +504,16 @@ func startBatchCmd(
 				Prompt:       prompt,
 			}
 
+			// Set up status change callback if manager has persistence
 			if agentMgr != nil {
-				agentMgr.Add(agent)
+				agent.OnStatusChange = agentMgr.CreateStatusCallback()
+			}
 
+			if agentMgr != nil {
 				// Start the agent if we can
 				if agentMgr.CanStart() {
 					if err := agent.Start(context.Background()); err != nil {
 						errors = append(errors, fmt.Sprintf("%s: start: %v", task.ID.String(), err))
-						agentMgr.Remove(task.ID.String())
 						// Clean up worktree on failure
 						if wtMgr != nil {
 							wtMgr.Remove(wtPath)
@@ -519,6 +521,9 @@ func startBatchCmd(
 						continue
 					}
 				}
+
+				// Add to manager after starting (so PID and LogPath are set)
+				agentMgr.Add(agent)
 			}
 
 			started = append(started, AgentStartInfo{

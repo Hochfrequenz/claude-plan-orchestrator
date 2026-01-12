@@ -63,4 +63,19 @@ CREATE TABLE IF NOT EXISTS batches (
     tasks_completed INTEGER DEFAULT 0,
     tasks_failed INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    log_path TEXT NOT NULL,
+    pid INTEGER,
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP,
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_task_id ON agent_runs(task_id);
 `
