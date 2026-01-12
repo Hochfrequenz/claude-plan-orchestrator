@@ -223,6 +223,9 @@ type AgentRun struct {
 	StartedAt    time.Time
 	FinishedAt   *time.Time
 	ErrorMessage string
+	TokensInput  int
+	TokensOutput int
+	CostUSD      float64
 }
 
 // SaveAgentRun creates or updates an agent run record
@@ -326,5 +329,13 @@ func (s *Store) UpdateAgentRunStatus(id string, status string, errorMessage stri
 // DeleteAgentRun removes an agent run record
 func (s *Store) DeleteAgentRun(id string) error {
 	_, err := s.db.Exec(`DELETE FROM agent_runs WHERE id = ?`, id)
+	return err
+}
+
+// UpdateAgentRunUsage updates the token usage for an agent run
+func (s *Store) UpdateAgentRunUsage(id string, tokensInput, tokensOutput int, costUSD float64) error {
+	_, err := s.db.Exec(`
+		UPDATE agent_runs SET tokens_input = ?, tokens_output = ?, cost_usd = ? WHERE id = ?
+	`, tokensInput, tokensOutput, costUSD, id)
 	return err
 }

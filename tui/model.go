@@ -91,6 +91,9 @@ type AgentView struct {
 	WorktreePath string
 	Error        string
 	Output       []string // Last N lines of output
+	TokensInput  int
+	TokensOutput int
+	CostUSD      float64
 }
 
 // FlaggedPR represents a PR needing attention

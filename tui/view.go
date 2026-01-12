@@ -285,6 +285,16 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm", m)
 }
 
+func formatTokens(n int) string {
+	if n >= 1000000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	}
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fK", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
 func (m Model) renderTabs() string {
 	tabs := []string{"Dashboard", "Tasks", "Agents", "Modules", "PRs"}
 	var parts []string
@@ -585,6 +595,16 @@ func (m Model) renderSelectedAgentDetail() string {
 	b.WriteString(fmt.Sprintf("  Duration: %s\n", formatDuration(agent.Duration)))
 	if agent.WorktreePath != "" {
 		b.WriteString(fmt.Sprintf("  Worktree: %s\n", agent.WorktreePath))
+	}
+
+	// Show token usage if available
+	if agent.TokensInput > 0 || agent.TokensOutput > 0 {
+		b.WriteString(fmt.Sprintf("  Tokens:   %s in / %s out",
+			formatTokens(agent.TokensInput), formatTokens(agent.TokensOutput)))
+		if agent.CostUSD > 0 {
+			b.WriteString(fmt.Sprintf(" ($%.4f)", agent.CostUSD))
+		}
+		b.WriteString("\n")
 	}
 
 	// Error section

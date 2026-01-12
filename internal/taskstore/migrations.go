@@ -73,7 +73,10 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     status TEXT NOT NULL DEFAULT 'running',
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     finished_at TIMESTAMP,
-    error_message TEXT
+    error_message TEXT,
+    tokens_input INTEGER DEFAULT 0,
+    tokens_output INTEGER DEFAULT 0,
+    cost_usd REAL DEFAULT 0.0
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);

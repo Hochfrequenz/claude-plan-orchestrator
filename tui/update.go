@@ -413,6 +413,12 @@ func (m *Model) updateAgentsFromManager() {
 			av.Output = output
 		}
 
+		// Capture token usage
+		tokensIn, tokensOut, cost := agent.GetUsage()
+		av.TokensInput = tokensIn
+		av.TokensOutput = tokensOut
+		av.CostUSD = cost
+
 		if agent.Status == executor.AgentRunning {
 			m.activeCount++
 			allDone = false

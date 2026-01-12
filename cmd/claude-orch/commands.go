@@ -441,6 +441,10 @@ func (a *agentStoreAdapter) DeleteAgentRun(id string) error {
 	return a.store.DeleteAgentRun(id)
 }
 
+func (a *agentStoreAdapter) UpdateAgentRunUsage(id string, tokensInput, tokensOutput int, costUSD float64) error {
+	return a.store.UpdateAgentRunUsage(id, tokensInput, tokensOutput, costUSD)
+}
+
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg, err := loadConfig()
 	if err != nil {

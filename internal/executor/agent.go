@@ -3,6 +3,7 @@ package executor
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -42,6 +43,11 @@ type Agent struct {
 	Output       []string
 	Error        error
 
+	// Token usage from Claude session
+	TokensInput  int
+	TokensOutput int
+	CostUSD      float64
+
 	OnStatusChange StatusChangeCallback // Called when status changes
 
 	cmd     *exec.Cmd
@@ -54,6 +60,7 @@ type Agent struct {
 type AgentStore interface {
 	SaveAgentRun(run *AgentRunRecord) error
 	UpdateAgentRunStatus(id string, status string, errorMessage string) error
+	UpdateAgentRunUsage(id string, tokensInput, tokensOutput int, costUSD float64) error
 	ListActiveAgentRuns() ([]*AgentRunRecord, error)
 	DeleteAgentRun(id string) error
 }
@@ -69,6 +76,9 @@ type AgentRunRecord struct {
 	StartedAt    time.Time
 	FinishedAt   *time.Time
 	ErrorMessage string
+	TokensInput  int
+	TokensOutput int
+	CostUSD      float64
 }
 
 // AgentManager manages concurrent agent execution
@@ -273,6 +283,8 @@ func (a *Agent) streamOutput(stdout, stderr io.ReadCloser) {
 		scanner.Buffer(buf, 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
+			// Try to parse token usage from result messages
+			a.parseUsageFromLine(line)
 			a.mu.Lock()
 			a.Output = append(a.Output, line)
 			// Write to log file
@@ -339,6 +351,42 @@ func (a *Agent) GetOutput() []string {
 	result := make([]string, len(a.Output))
 	copy(result, a.Output)
 	return result
+}
+
+// claudeResultMessage represents the final result message from Claude Code
+type claudeResultMessage struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Usage     struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage,omitempty"`
+	CostUSD float64 `json:"cost_usd,omitempty"`
+}
+
+// parseUsageFromLine tries to parse token usage from a stream-json line
+func (a *Agent) parseUsageFromLine(line string) {
+	var msg claudeResultMessage
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		return
+	}
+
+	// Only process result messages
+	if msg.Type == "result" {
+		a.mu.Lock()
+		a.TokensInput = msg.Usage.InputTokens
+		a.TokensOutput = msg.Usage.OutputTokens
+		a.CostUSD = msg.CostUSD
+		a.mu.Unlock()
+	}
+}
+
+// GetUsage returns token usage (input, output, cost)
+func (a *Agent) GetUsage() (int, int, float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.TokensInput, a.TokensOutput, a.CostUSD
 }
 
 // Duration returns how long the agent has been running
@@ -528,6 +576,13 @@ func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 	return func(agent *Agent, newStatus AgentStatus, errMsg string) {
 		if m.store != nil && agent.ID != "" {
 			m.store.UpdateAgentRunStatus(agent.ID, string(newStatus), errMsg)
+			// Save token usage when agent completes
+			if newStatus == AgentCompleted || newStatus == AgentFailed {
+				tokensIn, tokensOut, cost := agent.GetUsage()
+				if tokensIn > 0 || tokensOut > 0 {
+					m.store.UpdateAgentRunUsage(agent.ID, tokensIn, tokensOut, cost)
+				}
+			}
 		}
 	}
 }
