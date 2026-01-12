@@ -27,14 +27,8 @@ func NewWorktreeManager(repoDir, worktreeDir string) *WorktreeManager {
 }
 
 // Create creates a new worktree for a task
+// If an existing worktree or branch exists for this task, it will be cleaned up first
 func (m *WorktreeManager) Create(taskID domain.TaskID) (string, error) {
-	// Generate unique suffix
-	suffix := randomSuffix()
-
-	// Worktree path
-	dirName := fmt.Sprintf("%s-E%02d-%s", taskID.Module, taskID.EpicNum, suffix)
-	wtPath := filepath.Join(m.worktreeDir, dirName)
-
 	// Ensure worktree directory exists
 	if err := os.MkdirAll(m.worktreeDir, 0755); err != nil {
 		return "", fmt.Errorf("creating worktree dir: %w", err)
@@ -42,6 +36,19 @@ func (m *WorktreeManager) Create(taskID domain.TaskID) (string, error) {
 
 	// Branch name
 	branch := BranchName(taskID)
+
+	// Check if branch already exists (either as worktree or just branch)
+	// If so, clean it up first
+	if err := m.cleanupExistingBranch(branch); err != nil {
+		return "", fmt.Errorf("cleaning up existing branch: %w", err)
+	}
+
+	// Generate unique suffix
+	suffix := randomSuffix()
+
+	// Worktree path
+	dirName := fmt.Sprintf("%s-E%02d-%s", taskID.Module, taskID.EpicNum, suffix)
+	wtPath := filepath.Join(m.worktreeDir, dirName)
 
 	// Fetch latest from origin first (if remote exists)
 	fetchCmd := exec.Command("git", "fetch", "origin", "main")
@@ -64,6 +71,50 @@ func (m *WorktreeManager) Create(taskID domain.TaskID) (string, error) {
 	}
 
 	return wtPath, nil
+}
+
+// cleanupExistingBranch removes any existing worktree and branch for the given branch name
+func (m *WorktreeManager) cleanupExistingBranch(branch string) error {
+	// First, check if there's a worktree using this branch
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = m.repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil // Can't list worktrees, assume none exist
+	}
+
+	// Parse worktree list to find one with our branch
+	var worktreePath string
+	lines := strings.Split(string(out), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "worktree ") {
+			wtPath := strings.TrimPrefix(line, "worktree ")
+			// Check if next line has our branch
+			if i+2 < len(lines) && strings.TrimSpace(lines[i+2]) == "branch refs/heads/"+branch {
+				worktreePath = wtPath
+				break
+			}
+		}
+	}
+
+	// Remove the worktree if found
+	if worktreePath != "" {
+		cmd = exec.Command("git", "worktree", "remove", "--force", worktreePath)
+		cmd.Dir = m.repoDir
+		cmd.Run() // Ignore error, might already be removed
+	}
+
+	// Prune any stale worktree entries
+	cmd = exec.Command("git", "worktree", "prune")
+	cmd.Dir = m.repoDir
+	cmd.Run()
+
+	// Try to delete the branch (might fail if not merged, that's ok)
+	cmd = exec.Command("git", "branch", "-D", branch)
+	cmd.Dir = m.repoDir
+	cmd.Run() // Ignore error - branch might not exist
+
+	return nil
 }
 
 // Remove removes a worktree
