@@ -13,6 +13,9 @@ Epic file: %s
 %s
 Dependencies completed: %s
 
+**REQUIRED SKILL:** Use the autonomous-plan-execution skill for this workflow.
+This skill ensures fully autonomous execution with automatic PR creation and merge.
+
 IMPORTANT: You are running in autonomous mode. Do NOT ask for user input. Complete the entire workflow automatically.
 
 Instructions:
@@ -54,6 +57,7 @@ Files tested:
 
 Do not ask for clarification. Make reasonable decisions based on the epic content.
 Do not use any skills that ask for user input. Complete all steps automatically.
+Do NOT use finishing-a-development-branch or any skill that requires user interaction.
 `
 
 // BuildPrompt constructs the task prompt for Claude Code
