@@ -124,9 +124,10 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	// Build claude command with prompt as argument
 	a.cmd = exec.CommandContext(ctx, "claude",
-		"--print",                       // Non-interactive mode
+		"--print",                        // Non-interactive mode
 		"--dangerously-skip-permissions", // Skip permission prompts
-		"-p", a.Prompt,                  // Pass prompt as argument
+		"--output-format", "stream-json", // Stream output as JSON for realtime updates
+		"-p", a.Prompt,                   // Pass prompt as argument
 	)
 	a.cmd.Dir = a.WorktreePath
 
