@@ -277,9 +277,10 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	queued, _ := store.ListTasks(taskstore.ListOptions{Status: domain.StatusNotStarted})
 
 	model := tui.NewModel(tui.ModelConfig{
-		MaxActive: cfg.General.MaxParallelAgents,
-		AllTasks:  allTasks,
-		Queued:    queued,
+		MaxActive:   cfg.General.MaxParallelAgents,
+		AllTasks:    allTasks,
+		Queued:      queued,
+		ProjectRoot: cfg.General.ProjectRoot,
 	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen())

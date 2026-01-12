@@ -112,7 +112,12 @@ func (m Model) View() string {
 		b.WriteString(sectionStyle.Width(m.width - 2).Render(agentsSection))
 		b.WriteString("\n")
 
-	case 3: // PRs
+	case 3: // Modules
+		modulesSection := m.renderModules()
+		b.WriteString(sectionStyle.Width(m.width - 2).Render(modulesSection))
+		b.WriteString("\n")
+
+	case 4: // PRs
 		prsSection := m.renderPRs()
 		b.WriteString(sectionStyle.Width(m.width - 2).Render(prsSection))
 		b.WriteString("\n")
@@ -120,14 +125,17 @@ func (m Model) View() string {
 
 	// Status bar
 	var statusBar string
-	if m.activeTab == 1 {
+	switch m.activeTab {
+	case 1: // Tasks
 		viewModeStr := "priority"
 		if m.viewMode == ViewByModule {
 			viewModeStr = "module"
 		}
 		statusBar = fmt.Sprintf(" [tab]switch [v]iew mode (%s) [j/k]scroll [r]efresh [q]uit ", viewModeStr)
-	} else {
-		statusBar = " [tab]switch [t]asks [r]efresh [l]ogs [s]tart batch [p]ause [q]uit "
+	case 3: // Modules
+		statusBar = " [tab]switch [j/k]scroll [x]run tests [r]efresh [q]uit "
+	default:
+		statusBar = " [tab]switch [t]asks [m]odules [r]efresh [l]ogs [s]tart batch [p]ause [q]uit "
 	}
 	b.WriteString(statusBarStyle.Width(m.width).Render(statusBar))
 
@@ -217,7 +225,7 @@ func formatDuration(d time.Duration) string {
 }
 
 func (m Model) renderTabs() string {
-	tabs := []string{"Dashboard", "Tasks", "Agents", "PRs"}
+	tabs := []string{"Dashboard", "Tasks", "Agents", "Modules", "PRs"}
 	var parts []string
 
 	for i, tab := range tabs {
@@ -444,6 +452,122 @@ func (m Model) renderPRs() string {
 			pr.TaskID, pr.PRNumber, pr.Reason)
 		b.WriteString(warningStyle.Render(line))
 		b.WriteString("\n")
+	}
+
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func (m Model) renderModules() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("MODULES"))
+	b.WriteString("\n\n")
+
+	if len(m.modules) == 0 {
+		b.WriteString(queuedStyle.Render("  No modules found. Run 'claude-orch sync' to load tasks."))
+		return b.String()
+	}
+
+	// Show test output if running or has output
+	if m.testRunning {
+		b.WriteString(inProgressStyle.Render("  ⏳ Running tests..."))
+		b.WriteString("\n\n")
+	} else if m.testOutput != "" {
+		b.WriteString(queuedStyle.Render("  Last test output:"))
+		b.WriteString("\n")
+		// Show last few lines of test output
+		lines := strings.Split(m.testOutput, "\n")
+		start := 0
+		if len(lines) > 5 {
+			start = len(lines) - 5
+		}
+		for _, line := range lines[start:] {
+			if line != "" {
+				b.WriteString(queuedStyle.Render("  " + line))
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Header row
+	header := fmt.Sprintf("  %-20s %8s %8s %8s %8s %8s %8s",
+		"Module", "Epics", "Done", "InProg", "Tests", "Passed", "Failed")
+	b.WriteString(headerStyle.Render(header))
+	b.WriteString("\n")
+
+	// Calculate visible range for scrolling
+	maxVisible := 12
+	start := m.taskScroll
+	if start >= len(m.modules) {
+		start = 0
+	}
+	end := start + maxVisible
+	if end > len(m.modules) {
+		end = len(m.modules)
+	}
+
+	for i := start; i < end; i++ {
+		mod := m.modules[i]
+		selected := i == m.selectedModule
+
+		// Status indicator
+		var statusIcon string
+		var style lipgloss.Style
+		if mod.CompletedEpics == mod.TotalEpics && mod.TotalEpics > 0 {
+			statusIcon = "✓"
+			style = completedStyle
+		} else if mod.InProgressEpics > 0 {
+			statusIcon = "●"
+			style = inProgressStyle
+		} else {
+			statusIcon = "○"
+			style = normalPrioStyle
+		}
+
+		// Format line
+		line := fmt.Sprintf("  %s %-18s %8d %8d %8d %8d %8d %8d",
+			statusIcon,
+			truncate(mod.Name, 18),
+			mod.TotalEpics,
+			mod.CompletedEpics,
+			mod.InProgressEpics,
+			mod.TotalTests,
+			mod.PassedTests,
+			mod.FailedTests,
+		)
+
+		// Highlight selected row
+		if selected {
+			line = fmt.Sprintf("> %s", line[2:])
+			b.WriteString(tabActiveStyle.Render(line))
+		} else {
+			b.WriteString(style.Render(line))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.modules) > maxVisible {
+		b.WriteString(queuedStyle.Render(fmt.Sprintf("  ... showing %d-%d of %d modules (j/k to scroll)", start+1, end, len(m.modules))))
+		b.WriteString("\n")
+	}
+
+	// Show coverage summary if available
+	b.WriteString("\n")
+	var totalTests, totalPassed, totalFailed int
+	for _, mod := range m.modules {
+		totalTests += mod.TotalTests
+		totalPassed += mod.PassedTests
+		totalFailed += mod.FailedTests
+	}
+	if totalTests > 0 {
+		passRate := float64(totalPassed) / float64(totalTests) * 100
+		summary := fmt.Sprintf("  Total: %d tests, %d passed, %d failed (%.0f%% pass rate)",
+			totalTests, totalPassed, totalFailed, passRate)
+		if totalFailed > 0 {
+			b.WriteString(warningStyle.Render(summary))
+		} else {
+			b.WriteString(completedStyle.Render(summary))
+		}
 	}
 
 	return strings.TrimSuffix(b.String(), "\n")
