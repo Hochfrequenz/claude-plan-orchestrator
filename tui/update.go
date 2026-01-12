@@ -76,7 +76,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.taskScroll++
 			}
 			if m.activeTab == 2 { // Agents tab
-				if m.selectedAgent < len(m.agents)-1 {
+				if m.showAgentDetail {
+					// Scroll agent output down
+					m.agentOutputScroll++
+				} else if m.selectedAgent < len(m.agents)-1 {
 					m.selectedAgent++
 				}
 			}
@@ -98,7 +101,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.taskScroll--
 			}
 			if m.activeTab == 2 { // Agents tab
-				if m.selectedAgent > 0 {
+				if m.showAgentDetail {
+					// Scroll agent output up
+					if m.agentOutputScroll > 0 {
+						m.agentOutputScroll--
+					}
+				} else if m.selectedAgent > 0 {
 					m.selectedAgent--
 				}
 			}
@@ -111,15 +119,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.taskScroll = m.selectedModule
 				}
 			}
+		case "g":
+			// Jump to top of agent output
+			if m.activeTab == 2 && m.showAgentDetail {
+				m.agentOutputScroll = 0
+			}
+		case "G":
+			// Jump to bottom of agent output (handled in view by setting to max)
+			if m.activeTab == 2 && m.showAgentDetail {
+				m.agentOutputScroll = -1 // Signal to jump to end
+			}
 		case "enter":
 			// Toggle agent detail view (only on Agents tab)
 			if m.activeTab == 2 && len(m.agents) > 0 {
 				m.showAgentDetail = !m.showAgentDetail
+				m.agentOutputScroll = -1 // Start at bottom (most recent)
 			}
 		case "esc":
 			// Close agent detail view
 			if m.activeTab == 2 {
 				m.showAgentDetail = false
+				m.agentOutputScroll = 0
 			}
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % 5

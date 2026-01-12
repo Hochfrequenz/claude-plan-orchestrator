@@ -151,7 +151,7 @@ func (m Model) View() string {
 		statusBar = fmt.Sprintf(" [tab]switch [v]iew mode (%s) [j/k]scroll [r]efresh [q]uit ", viewModeStr)
 	case 2: // Agents
 		if m.showAgentDetail {
-			statusBar = " [esc/enter]back [r]efresh [q]uit "
+			statusBar = " [j/k]scroll [g]top [G]bottom [esc/enter]back [r]efresh [q]uit "
 		} else if len(m.agents) > 0 {
 			statusBar = " [tab]switch [j/k]navigate [enter]details [+/-]max agents [r]efresh [q]uit "
 		} else {
@@ -616,10 +616,8 @@ func (m Model) renderSelectedAgentDetail() string {
 		b.WriteString("\n")
 	}
 
-	// Output section
+	// Output section with scrolling
 	if len(agent.Output) > 0 {
-		b.WriteString("\n")
-		b.WriteString(titleStyle.Render("  OUTPUT (recent activity):"))
 		b.WriteString("\n")
 
 		// Format the JSON output into readable lines
@@ -629,16 +627,51 @@ func (m Model) renderSelectedAgentDetail() string {
 		}
 		formattedLines := formatClaudeOutput(agent.Output, maxWidth)
 
-		// Show last N formatted lines (more lines for better visibility)
-		maxLines := 25
-		start := 0
-		if len(formattedLines) > maxLines {
-			start = len(formattedLines) - maxLines
-			b.WriteString(queuedStyle.Render(fmt.Sprintf("  ... (%d earlier lines hidden)", start)))
+		// Calculate visible window
+		maxLines := 20
+		if m.height > 20 {
+			maxLines = m.height - 15 // Leave room for header and footer
+		}
+
+		totalLines := len(formattedLines)
+		scroll := m.agentOutputScroll
+
+		// Handle -1 as "jump to end"
+		if scroll < 0 || scroll > totalLines-maxLines {
+			scroll = totalLines - maxLines
+			if scroll < 0 {
+				scroll = 0
+			}
+		}
+
+		end := scroll + maxLines
+		if end > totalLines {
+			end = totalLines
+		}
+
+		// Header with scroll position
+		scrollInfo := ""
+		if totalLines > maxLines {
+			scrollInfo = fmt.Sprintf(" [%d-%d of %d]", scroll+1, end, totalLines)
+		}
+		b.WriteString(titleStyle.Render(fmt.Sprintf("  OUTPUT%s:", scrollInfo)))
+		b.WriteString("\n")
+
+		// Show scroll indicator at top
+		if scroll > 0 {
+			b.WriteString(queuedStyle.Render("  ↑ (more above)"))
 			b.WriteString("\n")
 		}
-		for _, line := range formattedLines[start:] {
-			b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s", line)))
+
+		// Show visible lines
+		for i := scroll; i < end; i++ {
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s", formattedLines[i])))
+			b.WriteString("\n")
+		}
+
+		// Show scroll indicator at bottom
+		if end < totalLines {
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  ↓ (%d more below)", totalLines-end)))
 			b.WriteString("\n")
 		}
 	} else if agent.Status == executor.AgentFailed {
@@ -648,7 +681,7 @@ func (m Model) renderSelectedAgentDetail() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(queuedStyle.Render("  Press [esc] or [enter] to go back"))
+	b.WriteString(queuedStyle.Render("  [j/k]scroll [g]top [G]bottom [esc]back"))
 
 	return strings.TrimSuffix(b.String(), "\n")
 }

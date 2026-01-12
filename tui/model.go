@@ -52,10 +52,11 @@ type Model struct {
 	viewMode       ViewMode
 	taskScroll     int
 	selectedModule int
-	selectedAgent  int
-	showAgentDetail bool
-	testRunning    bool
-	testOutput     string
+	selectedAgent      int
+	showAgentDetail    bool
+	agentOutputScroll  int // Scroll position for agent output
+	testRunning        bool
+	testOutput         string
 
 	// Config for test execution
 	projectRoot string
