@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
 
 var (
@@ -36,6 +38,33 @@ var (
 	statusBarStyle = lipgloss.NewStyle().
 		Background(lipgloss.Color("236")).
 		Foreground(lipgloss.Color("255"))
+
+	tabActiveStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("205")).
+		Underline(true)
+
+	tabInactiveStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	highPrioStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("196"))
+
+	normalPrioStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255"))
+
+	lowPrioStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	moduleHeaderStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("39"))
+
+	completedStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("42"))
+
+	inProgressStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214"))
 )
 
 // View renders the TUI
@@ -47,30 +76,59 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	// Header
-	header := fmt.Sprintf(" ERP Orchestrator │ Active: %d/%d │ Queued: %d │ Completed today: %d │ Flagged: %d ",
-		m.activeCount, m.maxActive, len(m.queued), m.completedToday, len(m.flagged))
+	header := fmt.Sprintf(" Claude Plan Orchestrator │ Active: %d/%d │ Tasks: %d │ Completed today: %d │ Flagged: %d ",
+		m.activeCount, m.maxActive, len(m.allTasks), m.completedToday, len(m.flagged))
 	b.WriteString(headerStyle.Width(m.width).Render(header))
 	b.WriteString("\n")
 
-	// Running section
-	runningSection := m.renderRunning()
-	b.WriteString(sectionStyle.Width(m.width - 2).Render(runningSection))
+	// Tab bar
+	b.WriteString(m.renderTabs())
 	b.WriteString("\n")
 
-	// Queued section
-	queuedSection := m.renderQueued()
-	b.WriteString(sectionStyle.Width(m.width - 2).Render(queuedSection))
-	b.WriteString("\n")
+	// Content based on active tab
+	switch m.activeTab {
+	case 0: // Dashboard
+		runningSection := m.renderRunning()
+		b.WriteString(sectionStyle.Width(m.width - 2).Render(runningSection))
+		b.WriteString("\n")
 
-	// Attention section
-	if len(m.flagged) > 0 {
-		attentionSection := m.renderAttention()
-		b.WriteString(sectionStyle.Width(m.width - 2).Render(attentionSection))
+		queuedSection := m.renderQueued()
+		b.WriteString(sectionStyle.Width(m.width - 2).Render(queuedSection))
+		b.WriteString("\n")
+
+		if len(m.flagged) > 0 {
+			attentionSection := m.renderAttention()
+			b.WriteString(sectionStyle.Width(m.width - 2).Render(attentionSection))
+			b.WriteString("\n")
+		}
+
+	case 1: // Tasks
+		tasksSection := m.renderTasks()
+		b.WriteString(sectionStyle.Width(m.width - 2).Render(tasksSection))
+		b.WriteString("\n")
+
+	case 2: // Agents
+		agentsSection := m.renderAgentsDetail()
+		b.WriteString(sectionStyle.Width(m.width - 2).Render(agentsSection))
+		b.WriteString("\n")
+
+	case 3: // PRs
+		prsSection := m.renderPRs()
+		b.WriteString(sectionStyle.Width(m.width - 2).Render(prsSection))
 		b.WriteString("\n")
 	}
 
 	// Status bar
-	statusBar := " [r]efresh [l]ogs [s]tart batch [p]ause [q]uit "
+	var statusBar string
+	if m.activeTab == 1 {
+		viewModeStr := "priority"
+		if m.viewMode == ViewByModule {
+			viewModeStr = "module"
+		}
+		statusBar = fmt.Sprintf(" [tab]switch [v]iew mode (%s) [j/k]scroll [r]efresh [q]uit ", viewModeStr)
+	} else {
+		statusBar = " [tab]switch [t]asks [r]efresh [l]ogs [s]tart batch [p]ause [q]uit "
+	}
 	b.WriteString(statusBarStyle.Width(m.width).Render(statusBar))
 
 	return b.String()
@@ -156,4 +214,237 @@ func truncate(s string, max int) string {
 func formatDuration(d time.Duration) string {
 	m := int(d.Minutes())
 	return fmt.Sprintf("%dm", m)
+}
+
+func (m Model) renderTabs() string {
+	tabs := []string{"Dashboard", "Tasks", "Agents", "PRs"}
+	var parts []string
+
+	for i, tab := range tabs {
+		if i == m.activeTab {
+			parts = append(parts, tabActiveStyle.Render(fmt.Sprintf(" %s ", tab)))
+		} else {
+			parts = append(parts, tabInactiveStyle.Render(fmt.Sprintf(" %s ", tab)))
+		}
+	}
+
+	return strings.Join(parts, "│")
+}
+
+func (m Model) renderTasks() string {
+	var b strings.Builder
+
+	if m.viewMode == ViewByPriority {
+		b.WriteString(titleStyle.Render("TASKS (by priority)"))
+	} else {
+		b.WriteString(titleStyle.Render("TASKS (by module)"))
+	}
+	b.WriteString("\n")
+
+	if len(m.allTasks) == 0 {
+		b.WriteString(queuedStyle.Render("  No tasks found. Run 'claude-orch sync' to load tasks."))
+		return b.String()
+	}
+
+	if m.viewMode == ViewByPriority {
+		b.WriteString(m.renderTasksByPriority())
+	} else {
+		b.WriteString(m.renderTasksByModule())
+	}
+
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func (m Model) renderTasksByPriority() string {
+	var b strings.Builder
+
+	// Sort tasks by priority (high -> normal -> low), then by module/epic
+	tasks := make([]*domain.Task, len(m.allTasks))
+	copy(tasks, m.allTasks)
+	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].Priority != tasks[j].Priority {
+			return tasks[i].Priority < tasks[j].Priority // Lower enum = higher priority
+		}
+		if tasks[i].ID.Module != tasks[j].ID.Module {
+			return tasks[i].ID.Module < tasks[j].ID.Module
+		}
+		return tasks[i].ID.EpicNum < tasks[j].ID.EpicNum
+	})
+
+	// Calculate visible range
+	maxVisible := 15
+	start := m.taskScroll
+	if start >= len(tasks) {
+		start = 0
+	}
+	end := start + maxVisible
+	if end > len(tasks) {
+		end = len(tasks)
+	}
+
+	for i := start; i < end; i++ {
+		task := tasks[i]
+		line := m.formatTaskLine(task)
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	if len(tasks) > maxVisible {
+		b.WriteString(queuedStyle.Render(fmt.Sprintf("  ... showing %d-%d of %d (j/k to scroll)", start+1, end, len(tasks))))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderTasksByModule() string {
+	var b strings.Builder
+
+	// Group tasks by module
+	modules := make(map[string][]*domain.Task)
+	var moduleOrder []string
+
+	for _, task := range m.allTasks {
+		mod := task.ID.Module
+		if _, exists := modules[mod]; !exists {
+			moduleOrder = append(moduleOrder, mod)
+		}
+		modules[mod] = append(modules[mod], task)
+	}
+
+	// Sort module names
+	sort.Strings(moduleOrder)
+
+	// Sort tasks within each module by epic number
+	for _, tasks := range modules {
+		sort.Slice(tasks, func(i, j int) bool {
+			return tasks[i].ID.EpicNum < tasks[j].ID.EpicNum
+		})
+	}
+
+	lineCount := 0
+	maxVisible := 15
+	start := m.taskScroll
+
+	for _, mod := range moduleOrder {
+		tasks := modules[mod]
+
+		// Module header
+		if lineCount >= start && lineCount < start+maxVisible {
+			b.WriteString(moduleHeaderStyle.Render(fmt.Sprintf("  ┌─ %s (%d tasks)", mod, len(tasks))))
+			b.WriteString("\n")
+		}
+		lineCount++
+
+		for _, task := range tasks {
+			if lineCount >= start && lineCount < start+maxVisible {
+				line := m.formatTaskLine(task)
+				b.WriteString("  │" + line[2:])
+				b.WriteString("\n")
+			}
+			lineCount++
+		}
+	}
+
+	if lineCount > maxVisible {
+		b.WriteString(queuedStyle.Render(fmt.Sprintf("  ... showing %d lines (j/k to scroll)", maxVisible)))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) formatTaskLine(task *domain.Task) string {
+	// Status icon
+	var statusIcon string
+	var style lipgloss.Style
+	switch task.Status {
+	case domain.StatusComplete:
+		statusIcon = "✓"
+		style = completedStyle
+	case domain.StatusInProgress:
+		statusIcon = "●"
+		style = inProgressStyle
+	default:
+		statusIcon = "○"
+		switch task.Priority {
+		case domain.PriorityHigh:
+			style = highPrioStyle
+		case domain.PriorityLow:
+			style = lowPrioStyle
+		default:
+			style = normalPrioStyle
+		}
+	}
+
+	// Priority indicator
+	var prioStr string
+	switch task.Priority {
+	case domain.PriorityHigh:
+		prioStr = "!"
+	case domain.PriorityLow:
+		prioStr = "-"
+	default:
+		prioStr = " "
+	}
+
+	line := fmt.Sprintf("  %s %s %-15s %-30s",
+		statusIcon, prioStr, task.ID.String(), truncate(task.Title, 30))
+
+	return style.Render(line)
+}
+
+func (m Model) renderAgentsDetail() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("AGENTS"))
+	b.WriteString("\n")
+
+	if len(m.agents) == 0 {
+		b.WriteString(queuedStyle.Render("  No agents"))
+		return b.String()
+	}
+
+	for _, agent := range m.agents {
+		var statusIcon string
+		var style lipgloss.Style
+		switch agent.Status {
+		case "running":
+			statusIcon = "●"
+			style = runningStyle
+		case "completed":
+			statusIcon = "✓"
+			style = completedStyle
+		default:
+			statusIcon = "○"
+			style = queuedStyle
+		}
+
+		line := fmt.Sprintf("  %s %-15s %-25s %8s  %s",
+			statusIcon, agent.TaskID, truncate(agent.Title, 25),
+			formatDuration(agent.Duration), agent.Progress)
+		b.WriteString(style.Render(line))
+		b.WriteString("\n")
+	}
+
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func (m Model) renderPRs() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("PULL REQUESTS"))
+	b.WriteString("\n")
+
+	if len(m.flagged) == 0 {
+		b.WriteString(queuedStyle.Render("  No PRs needing attention"))
+		return b.String()
+	}
+
+	for _, pr := range m.flagged {
+		line := fmt.Sprintf("  ⚠ %-15s PR #%-5d %s",
+			pr.TaskID, pr.PRNumber, pr.Reason)
+		b.WriteString(warningStyle.Render(line))
+		b.WriteString("\n")
+	}
+
+	return strings.TrimSuffix(b.String(), "\n")
 }

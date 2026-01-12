@@ -8,12 +8,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// ViewMode determines how tasks are displayed
+type ViewMode int
+
+const (
+	ViewByPriority ViewMode = iota
+	ViewByModule
+)
+
 // Model is the TUI application model
 type Model struct {
 	// Data
-	agents  []*AgentView
-	queued  []*domain.Task
-	flagged []*FlaggedPR
+	agents   []*AgentView
+	queued   []*domain.Task
+	allTasks []*domain.Task
+	flagged  []*FlaggedPR
 
 	// Stats
 	activeCount    int
@@ -25,6 +34,8 @@ type Model struct {
 	height      int
 	activeTab   int
 	selectedRow int
+	viewMode    ViewMode
+	taskScroll  int
 
 	// Refresh
 	lastRefresh time.Time
