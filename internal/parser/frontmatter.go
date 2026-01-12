@@ -58,6 +58,8 @@ func ToPriority(s string) domain.Priority {
 	switch s {
 	case "high":
 		return domain.PriorityHigh
+	case "medium":
+		return domain.PriorityMedium
 	case "low":
 		return domain.PriorityLow
 	default:

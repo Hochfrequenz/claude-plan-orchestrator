@@ -56,9 +56,19 @@ type Model struct {
 
 	// Config for test execution
 	projectRoot string
+	worktreeDir string
+
+	// Executor managers
+	agentManager    *executor.AgentManager
+	worktreeManager *executor.WorktreeManager
 
 	// Config state
 	configChanged bool
+
+	// Batch execution state
+	batchRunning bool
+	batchPaused  bool
+	statusMsg    string
 
 	// Refresh
 	lastRefresh time.Time
@@ -82,12 +92,15 @@ type FlaggedPR struct {
 
 // ModelConfig holds initial data for the TUI model
 type ModelConfig struct {
-	MaxActive   int
-	AllTasks    []*domain.Task
-	Queued      []*domain.Task
-	Agents      []*AgentView
-	Flagged     []*FlaggedPR
-	ProjectRoot string
+	MaxActive       int
+	AllTasks        []*domain.Task
+	Queued          []*domain.Task
+	Agents          []*AgentView
+	Flagged         []*FlaggedPR
+	ProjectRoot     string
+	WorktreeDir     string
+	AgentManager    *executor.AgentManager
+	WorktreeManager *executor.WorktreeManager
 }
 
 // NewModel creates a new TUI model
@@ -102,16 +115,30 @@ func NewModel(cfg ModelConfig) Model {
 	// Compute module summaries
 	modules := computeModuleSummaries(cfg.AllTasks)
 
+	// Use provided managers or create defaults
+	agentMgr := cfg.AgentManager
+	if agentMgr == nil {
+		agentMgr = executor.NewAgentManager(cfg.MaxActive)
+	}
+
+	worktreeMgr := cfg.WorktreeManager
+	if worktreeMgr == nil && cfg.ProjectRoot != "" && cfg.WorktreeDir != "" {
+		worktreeMgr = executor.NewWorktreeManager(cfg.ProjectRoot, cfg.WorktreeDir)
+	}
+
 	return Model{
-		maxActive:   cfg.MaxActive,
-		allTasks:    cfg.AllTasks,
-		queued:      cfg.Queued,
-		agents:      cfg.Agents,
-		flagged:     cfg.Flagged,
-		modules:     modules,
-		activeCount: activeCount,
-		activeTab:   0,
-		projectRoot: cfg.ProjectRoot,
+		maxActive:       cfg.MaxActive,
+		allTasks:        cfg.AllTasks,
+		queued:          cfg.Queued,
+		agents:          cfg.Agents,
+		flagged:         cfg.Flagged,
+		modules:         modules,
+		activeCount:     activeCount,
+		activeTab:       0,
+		projectRoot:     cfg.ProjectRoot,
+		worktreeDir:     cfg.WorktreeDir,
+		agentManager:    agentMgr,
+		worktreeManager: worktreeMgr,
 	}
 }
 

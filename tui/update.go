@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/mcp"
 )
 
@@ -13,6 +15,36 @@ import (
 type TestCompleteMsg struct {
 	Output string
 	Err    error
+}
+
+// BatchStartMsg is sent to start a batch of tasks
+type BatchStartMsg struct {
+	Count   int
+	Started []string // Task IDs that were started
+	Errors  []string // Any errors during startup
+}
+
+// BatchPauseMsg is sent to pause batch execution
+type BatchPauseMsg struct{}
+
+// BatchResumeMsg is sent to resume batch execution
+type BatchResumeMsg struct{}
+
+// StatusUpdateMsg updates the status message
+type StatusUpdateMsg string
+
+// AgentUpdateMsg reports an agent status change
+type AgentUpdateMsg struct {
+	TaskID string
+	Status executor.AgentStatus
+	Error  error
+}
+
+// AgentCompleteMsg is sent when an agent finishes
+type AgentCompleteMsg struct {
+	TaskID  string
+	Success bool
+	Output  string
 }
 
 // Update handles messages
@@ -98,6 +130,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.configChanged = true
 				}
 			}
+		case "s":
+			// Start batch (only on Dashboard tab)
+			if m.activeTab == 0 && !m.batchRunning {
+				slotsAvailable := m.maxActive - m.activeCount
+				if slotsAvailable > 0 && len(m.queued) > 0 {
+					m.batchRunning = true
+					m.batchPaused = false
+					count := min(slotsAvailable, len(m.queued))
+					m.statusMsg = fmt.Sprintf("Starting batch: %d task(s)...", count)
+					return m, startBatchCmd(
+						m.projectRoot,
+						m.queued[:count],
+						m.worktreeManager,
+						m.agentManager,
+					)
+				} else if slotsAvailable == 0 {
+					m.statusMsg = "No agent slots available"
+				} else {
+					m.statusMsg = "No tasks queued"
+				}
+			}
+		case "p":
+			// Pause/Resume batch (only on Dashboard tab)
+			if m.activeTab == 0 {
+				if m.batchRunning && !m.batchPaused {
+					m.batchPaused = true
+					m.statusMsg = "Batch paused"
+				} else if m.batchRunning && m.batchPaused {
+					m.batchPaused = false
+					m.statusMsg = "Batch resumed"
+				}
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -105,8 +169,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case TickMsg:
-		// Refresh data would happen here
+		// Refresh agent status from manager
+		if m.agentManager != nil && m.batchRunning {
+			m.updateAgentsFromManager()
+		}
 		return m, tickCmd()
+
+	case AgentUpdateMsg:
+		// Update agent view with new status
+		for i, a := range m.agents {
+			if a.TaskID == msg.TaskID {
+				m.agents[i].Status = msg.Status
+				break
+			}
+		}
+		// Update active count
+		m.activeCount = 0
+		for _, a := range m.agents {
+			if a.Status == executor.AgentRunning {
+				m.activeCount++
+			}
+		}
+		return m, nil
+
+	case AgentCompleteMsg:
+		// Handle agent completion
+		for i, a := range m.agents {
+			if a.TaskID == msg.TaskID {
+				if msg.Success {
+					m.agents[i].Status = executor.AgentCompleted
+				} else {
+					m.agents[i].Status = executor.AgentFailed
+				}
+				break
+			}
+		}
+		// Update active count
+		m.activeCount = 0
+		for _, a := range m.agents {
+			if a.Status == executor.AgentRunning {
+				m.activeCount++
+			}
+		}
+		// Check if all agents are done
+		allDone := true
+		for _, a := range m.agents {
+			if a.Status == executor.AgentRunning || a.Status == executor.AgentQueued {
+				allDone = false
+				break
+			}
+		}
+		if allDone && m.batchRunning {
+			m.batchRunning = false
+			m.statusMsg = "Batch complete"
+		}
+		return m, nil
 
 	case TestCompleteMsg:
 		m.testRunning = false
@@ -114,6 +231,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.testOutput = "Error: " + msg.Err.Error()
 		} else {
 			m.testOutput = msg.Output
+		}
+		return m, nil
+
+	case StatusUpdateMsg:
+		m.statusMsg = string(msg)
+		return m, nil
+
+	case BatchStartMsg:
+		// Batch has been initiated - add agents to view
+		for _, taskID := range msg.Started {
+			// Find the task to get its title
+			var title string
+			for _, t := range m.queued {
+				if t.ID.String() == taskID {
+					title = t.Title
+					break
+				}
+			}
+			m.agents = append(m.agents, &AgentView{
+				TaskID:   taskID,
+				Title:    title,
+				Status:   executor.AgentRunning,
+				Duration: 0,
+			})
+			m.activeCount++
+		}
+		// Remove started tasks from queued
+		var remaining []*domain.Task
+		for _, t := range m.queued {
+			started := false
+			for _, startedID := range msg.Started {
+				if t.ID.String() == startedID {
+					started = true
+					break
+				}
+			}
+			if !started {
+				remaining = append(remaining, t)
+			}
+		}
+		m.queued = remaining
+
+		if len(msg.Errors) > 0 {
+			m.statusMsg = fmt.Sprintf("Batch started: %d task(s), %d error(s)", msg.Count, len(msg.Errors))
+		} else {
+			m.statusMsg = fmt.Sprintf("Batch started: %d task(s)", msg.Count)
 		}
 		return m, nil
 	}
@@ -140,6 +303,40 @@ func (m *Model) SetTasks(tasks []*domain.Task) {
 // SetQueued updates the queued tasks list
 func (m *Model) SetQueued(tasks []*domain.Task) {
 	m.queued = tasks
+}
+
+// updateAgentsFromManager syncs the agents view with the agent manager
+func (m *Model) updateAgentsFromManager() {
+	if m.agentManager == nil {
+		return
+	}
+
+	// Update duration and status for each agent in the view
+	m.activeCount = 0
+	allDone := true
+
+	for _, av := range m.agents {
+		agent := m.agentManager.Get(av.TaskID)
+		if agent == nil {
+			continue
+		}
+
+		av.Status = agent.Status
+		av.Duration = agent.Duration()
+
+		if agent.Status == executor.AgentRunning {
+			m.activeCount++
+			allDone = false
+		} else if agent.Status == executor.AgentQueued {
+			allDone = false
+		}
+	}
+
+	// Check if batch is complete
+	if allDone && m.batchRunning && len(m.agents) > 0 {
+		m.batchRunning = false
+		m.statusMsg = "Batch complete"
+	}
 }
 
 // GetMaxActive returns the current max active agents setting
@@ -222,4 +419,73 @@ func runModuleTests(projectRoot, moduleName string) tea.Cmd {
 			Err:    nil,
 		}
 	}
+}
+
+// startBatchCmd initiates batch execution of queued tasks
+func startBatchCmd(
+	projectRoot string,
+	tasks []*domain.Task,
+	wtMgr *executor.WorktreeManager,
+	agentMgr *executor.AgentManager,
+) tea.Cmd {
+	return func() tea.Msg {
+		var started []string
+		var errors []string
+
+		for _, task := range tasks {
+			// Create worktree for this task
+			var wtPath string
+			var err error
+			if wtMgr != nil {
+				wtPath, err = wtMgr.Create(task.ID)
+				if err != nil {
+					errors = append(errors, fmt.Sprintf("%s: %v", task.ID.String(), err))
+					continue
+				}
+			} else {
+				// No worktree manager - use project root directly (for testing)
+				wtPath = projectRoot
+			}
+
+			// Build prompt for the agent
+			prompt := executor.BuildPrompt(task, task.Description, "", nil)
+
+			// Create and register the agent
+			agent := &executor.Agent{
+				TaskID:       task.ID,
+				WorktreePath: wtPath,
+				Status:       executor.AgentQueued,
+				Prompt:       prompt,
+			}
+
+			if agentMgr != nil {
+				agentMgr.Add(agent)
+
+				// Start the agent if we can
+				if agentMgr.CanStart() {
+					if err := agent.Start(context.Background()); err != nil {
+						errors = append(errors, fmt.Sprintf("%s: %v", task.ID.String(), err))
+						agentMgr.Remove(task.ID.String())
+						continue
+					}
+				}
+			}
+
+			started = append(started, task.ID.String())
+		}
+
+		return BatchStartMsg{
+			Count:   len(started),
+			Started: started,
+			Errors:  errors,
+		}
+	}
+}
+
+// min returns the smaller of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

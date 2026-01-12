@@ -123,6 +123,21 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	}
 
+	// Status message (if any)
+	if m.statusMsg != "" {
+		statusLine := fmt.Sprintf(" %s ", m.statusMsg)
+		if m.batchRunning {
+			if m.batchPaused {
+				b.WriteString(warningStyle.Width(m.width).Render("⏸ " + statusLine))
+			} else {
+				b.WriteString(runningStyle.Width(m.width).Render("▶ " + statusLine))
+			}
+		} else {
+			b.WriteString(queuedStyle.Width(m.width).Render(statusLine))
+		}
+		b.WriteString("\n")
+	}
+
 	// Status bar
 	var statusBar string
 	switch m.activeTab {
@@ -137,7 +152,13 @@ func (m Model) View() string {
 	case 3: // Modules
 		statusBar = " [tab]switch [j/k]scroll [x]run tests [r]efresh [q]uit "
 	default:
-		statusBar = " [tab]switch [t]asks [m]odules [r]efresh [l]ogs [s]tart batch [p]ause [q]uit "
+		if m.batchRunning && !m.batchPaused {
+			statusBar = " [tab]switch [t]asks [m]odules [r]efresh [p]ause [q]uit "
+		} else if m.batchRunning && m.batchPaused {
+			statusBar = " [tab]switch [t]asks [m]odules [r]efresh [p]resume [q]uit "
+		} else {
+			statusBar = " [tab]switch [t]asks [m]odules [r]efresh [s]tart batch [q]uit "
+		}
 	}
 	b.WriteString(statusBarStyle.Width(m.width).Render(statusBar))
 
