@@ -13,6 +13,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/skills"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
 	"github.com/hochfrequenz/claude-plan-orchestrator/tui"
 	"github.com/hochfrequenz/claude-plan-orchestrator/web/api"
@@ -259,6 +260,13 @@ func runLogs(cmd *cobra.Command, args []string) error {
 }
 
 func runTUI(cmd *cobra.Command, args []string) error {
+	// Ensure required skills are installed
+	if installed, err := skills.EnsureInstalled(); err != nil {
+		fmt.Printf("Warning: failed to install skills: %v\n", err)
+	} else if installed {
+		fmt.Println("Installed autonomous-plan-execution skill")
+	}
+
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
