@@ -356,7 +356,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		PlanChangeChan:  planChangeChan,
 	})
 
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	finalModel, err := p.Run()
 	if err != nil {

@@ -219,6 +219,65 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			// Scroll up
+			if m.activeTab == 2 && m.showAgentDetail {
+				if m.agentOutputScroll > 0 {
+					m.agentOutputScroll -= 3
+					if m.agentOutputScroll < 0 {
+						m.agentOutputScroll = 0
+					}
+				}
+			} else if m.activeTab == 1 && m.taskScroll > 0 {
+				m.taskScroll -= 3
+				if m.taskScroll < 0 {
+					m.taskScroll = 0
+				}
+			} else if m.activeTab == 3 && m.taskScroll > 0 {
+				m.taskScroll -= 3
+				if m.taskScroll < 0 {
+					m.taskScroll = 0
+				}
+			}
+		case tea.MouseButtonWheelDown:
+			// Scroll down
+			if m.activeTab == 2 && m.showAgentDetail {
+				m.agentOutputScroll += 3
+			} else if m.activeTab == 1 {
+				m.taskScroll += 3
+			} else if m.activeTab == 3 {
+				m.taskScroll += 3
+			}
+		case tea.MouseButtonLeft:
+			// Handle clicks
+			if msg.Y == 1 {
+				// Click on tab bar (row 1)
+				// Tabs are roughly: Dashboard | Tasks | Agents | Modules | PRs
+				// Each tab is about 12 chars wide
+				tabIndex := msg.X / 12
+				if tabIndex >= 0 && tabIndex < 5 {
+					m.activeTab = tabIndex
+					m.taskScroll = 0
+					m.showAgentDetail = false
+				}
+			} else if m.activeTab == 2 && !m.showAgentDetail && len(m.agents) > 0 {
+				// Click on agent list - select agent (rows start around 5)
+				clickedRow := msg.Y - 5
+				if clickedRow >= 0 && clickedRow < len(m.agents) {
+					m.selectedAgent = clickedRow
+				}
+			}
+		case tea.MouseButtonRight:
+			// Right click to go back in agent detail
+			if m.activeTab == 2 && m.showAgentDetail {
+				m.showAgentDetail = false
+				m.agentOutputScroll = 0
+			}
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
