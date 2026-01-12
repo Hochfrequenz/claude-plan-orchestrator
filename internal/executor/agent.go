@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -554,6 +555,109 @@ func (a *Agent) LoadOutputFromLog(maxLines int) error {
 	return scanner.Err()
 }
 
+// LoadOutput loads agent output, preferring Claude session file for resumed agents
+// This ensures we capture output even if TUI was closed while agent ran
+func (a *Agent) LoadOutput(maxLines int) error {
+	// For agents with a session ID, try Claude's session file first
+	// This captures output from resumed sessions even if TUI wasn't running
+	if a.SessionID != "" {
+		sessionPath := a.GetClaudeSessionFilePath()
+		if sessionPath != "" {
+			if _, err := os.Stat(sessionPath); err == nil {
+				// Session file exists, load from it
+				return a.LoadOutputFromClaudeSession(maxLines)
+			}
+		}
+	}
+
+	// Fall back to our log file
+	return a.LoadOutputFromLog(maxLines)
+}
+
+// GetClaudeSessionFilePath returns the path to Claude Code's session JSONL file
+// Claude Code stores sessions at ~/.claude/projects/<encoded-path>/<session-id>.jsonl
+func (a *Agent) GetClaudeSessionFilePath() string {
+	if a.SessionID == "" || a.WorktreePath == "" {
+		return ""
+	}
+
+	// Encode the worktree path: replace / with - and prefix with -
+	encodedPath := "-" + strings.ReplaceAll(strings.TrimPrefix(a.WorktreePath, "/"), "/", "-")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	return filepath.Join(homeDir, ".claude", "projects", encodedPath, a.SessionID+".jsonl")
+}
+
+// claudeSessionMessage represents a message in Claude Code's session JSONL
+type claudeSessionMessage struct {
+	Type      string `json:"type,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	Message   struct {
+		Role    string `json:"role,omitempty"`
+		Content []struct {
+			Type string `json:"type,omitempty"`
+			Text string `json:"text,omitempty"`
+		} `json:"content,omitempty"`
+	} `json:"message,omitempty"`
+}
+
+// LoadOutputFromClaudeSession reads output from Claude Code's session file
+// This captures output even if the TUI was closed while the agent ran
+func (a *Agent) LoadOutputFromClaudeSession(maxMessages int) error {
+	sessionPath := a.GetClaudeSessionFilePath()
+	if sessionPath == "" {
+		return nil // No session file path available
+	}
+
+	file, err := os.Open(sessionPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // Session file doesn't exist
+		}
+		return err
+	}
+	defer file.Close()
+
+	var messages []string
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 2*1024*1024) // 2MB buffer for large JSON lines
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		var msg claudeSessionMessage
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue // Skip unparseable lines
+		}
+
+		// Extract assistant messages
+		if msg.Message.Role == "assistant" {
+			for _, content := range msg.Message.Content {
+				if content.Type == "text" && content.Text != "" {
+					// Format as a readable message
+					messages = append(messages, fmt.Sprintf("[assistant] %s", content.Text))
+				}
+			}
+		}
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Keep only last maxMessages
+	if len(messages) > maxMessages {
+		a.Output = messages[len(messages)-maxMessages:]
+	} else {
+		a.Output = messages
+	}
+
+	return scanner.Err()
+}
+
 // TailLogFile starts tailing the log file and updating Output
 func (a *Agent) TailLogFile(ctx context.Context) error {
 	if a.LogPath == "" {
@@ -643,8 +747,8 @@ func (m *AgentManager) RecoverAgents(ctx context.Context) ([]*Agent, error) {
 		// Check if process is still running
 		if agent.IsProcessRunning() {
 			agent.Status = AgentRunning
-			// Load recent output from log file
-			agent.LoadOutputFromLog(100)
+			// Load recent output (prefers Claude session file for resumed agents)
+			agent.LoadOutput(100)
 			// Start tailing the log file
 			agent.TailLogFile(ctx)
 		} else {
@@ -653,8 +757,8 @@ func (m *AgentManager) RecoverAgents(ctx context.Context) ([]*Agent, error) {
 			agent.Status = AgentCompleted
 			now := time.Now()
 			agent.FinishedAt = &now
-			// Load all output from log file
-			agent.LoadOutputFromLog(100)
+			// Load output (prefers Claude session file for resumed agents)
+			agent.LoadOutput(100)
 			// Update database
 			m.store.UpdateAgentRunStatus(run.ID, "completed", "")
 		}
