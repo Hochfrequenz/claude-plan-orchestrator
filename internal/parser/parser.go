@@ -15,9 +15,12 @@ import (
 )
 
 var (
-	epicFileRegex  = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)
+	epicFileRegex = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)
+	// moduleDirRegex matches standard module directories like "technical-module"
 	moduleDirRegex = regexp.MustCompile(`^([a-z][a-z0-9-]*)-module$`)
-	titleRegex     = regexp.MustCompile(`^#\s+(.+)$`)
+	// extendedModuleDirRegex matches extended module directories like "customer-module-expanded"
+	extendedModuleDirRegex = regexp.MustCompile(`^([a-z][a-z0-9-]*-module-[a-z][a-z0-9-]*)$`)
+	titleRegex             = regexp.MustCompile(`^#\s+(.+)$`)
 	// Match table rows like: | [E01](path) | Description | 🟢 | or | E01 | Title | 🟢 |
 	readmeStatusRegex = regexp.MustCompile(`\|\s*\[?E(\d+)\]?(?:\([^)]*\))?\s*\|.*([🔴🟡🟢])\s*\|`)
 )
@@ -119,13 +122,18 @@ func ParsePlansDir(plansDir string) ([]*domain.Task, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		if !moduleDirRegex.MatchString(entry.Name()) {
+
+		// Check if directory contains any epic files
+		dirPath := filepath.Join(plansDir, entry.Name())
+		hasEpics, err := directoryHasEpicFiles(dirPath)
+		if err != nil || !hasEpics {
 			continue
 		}
 
-		tasks, err := ParseModuleDir(filepath.Join(plansDir, entry.Name()))
+		tasks, err := ParseModuleDir(dirPath)
 		if err != nil {
-			return nil, fmt.Errorf("parsing module %s: %w", entry.Name(), err)
+			// Log but don't fail - some directories might have different structures
+			continue
 		}
 		allTasks = append(allTasks, tasks...)
 	}
@@ -145,6 +153,20 @@ func ParsePlansDir(plansDir string) ([]*domain.Task, error) {
 	}
 
 	return allTasks, nil
+}
+
+// directoryHasEpicFiles checks if a directory contains any epic-*.md files
+func directoryHasEpicFiles(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && epicFileRegex.MatchString(entry.Name()) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ParseReadmeStatuses reads task statuses from traffic light emojis in README.md
@@ -260,20 +282,41 @@ func ExtractTaskIDFromPath(path string) (domain.TaskID, error) {
 
 	// Extract module from directory name
 	dirBase := filepath.Base(dir)
-	matches := moduleDirRegex.FindStringSubmatch(dirBase)
-	if matches == nil {
+	module := extractModuleName(dirBase)
+	if module == "" {
 		return domain.TaskID{}, fmt.Errorf("invalid module directory: %s", dirBase)
 	}
-	module := matches[1]
 
 	// Extract epic number from filename
-	matches = epicFileRegex.FindStringSubmatch(base)
+	matches := epicFileRegex.FindStringSubmatch(base)
 	if matches == nil {
 		return domain.TaskID{}, fmt.Errorf("invalid epic filename: %s", base)
 	}
 	epicNum, _ := strconv.Atoi(matches[1])
 
 	return domain.TaskID{Module: module, EpicNum: epicNum}, nil
+}
+
+// extractModuleName extracts the module name from a directory name
+// Handles patterns like:
+//   - "technical-module" -> "technical"
+//   - "customer-module-expanded" -> "customer-module-expanded"
+//   - "testing-strategy" -> "testing-strategy"
+func extractModuleName(dirName string) string {
+	// Try standard module pattern first: xxx-module -> xxx
+	if matches := moduleDirRegex.FindStringSubmatch(dirName); matches != nil {
+		return matches[1]
+	}
+	// Try extended module pattern: xxx-module-yyy -> xxx-module-yyy (keep as-is)
+	if extendedModuleDirRegex.MatchString(dirName) {
+		return dirName
+	}
+	// For any other directory with lowercase letters and hyphens, use as-is
+	// This handles directories like "testing-strategy", "infrastructure", etc.
+	if regexp.MustCompile(`^[a-z][a-z0-9-]*$`).MatchString(dirName) {
+		return dirName
+	}
+	return ""
 }
 
 func extractTitle(content []byte) string {

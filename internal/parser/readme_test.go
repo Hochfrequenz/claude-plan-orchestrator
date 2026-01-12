@@ -284,3 +284,48 @@ func keys(m map[string]domain.TaskStatus) []string {
 	}
 	return result
 }
+
+func TestParsePlansDir_RealEnergyERP(t *testing.T) {
+	// Test against the actual energyerp docs/plans directory
+	plansDir := "/home/claude/github/energyerp/docs/plans"
+	if _, err := os.Stat(plansDir); os.IsNotExist(err) {
+		t.Skip("energyerp docs/plans not found, skipping real directory test")
+	}
+
+	tasks, err := ParsePlansDir(plansDir)
+	if err != nil {
+		t.Fatalf("ParsePlansDir failed: %v", err)
+	}
+
+	t.Logf("Parsed %d tasks from real energyerp:", len(tasks))
+
+	// Count statuses
+	statusCounts := make(map[domain.TaskStatus]int)
+	for _, task := range tasks {
+		statusCounts[task.Status]++
+	}
+
+	t.Logf("Status counts:")
+	t.Logf("  Not Started: %d", statusCounts[domain.StatusNotStarted])
+	t.Logf("  In Progress: %d", statusCounts[domain.StatusInProgress])
+	t.Logf("  Complete: %d", statusCounts[domain.StatusComplete])
+
+	// Log first 20 tasks with their statuses
+	t.Logf("Sample tasks:")
+	for i, task := range tasks {
+		if i >= 20 {
+			break
+		}
+		t.Logf("  %s: %s (%s)", task.ID.String(), task.Title, task.Status)
+	}
+
+	// Should have parsed multiple tasks
+	if len(tasks) < 50 {
+		t.Errorf("Expected at least 50 tasks, got %d", len(tasks))
+	}
+
+	// Should have some complete tasks (from README)
+	if statusCounts[domain.StatusComplete] == 0 {
+		t.Error("Expected some complete tasks from README status parsing")
+	}
+}
