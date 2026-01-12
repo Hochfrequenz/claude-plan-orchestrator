@@ -74,7 +74,7 @@ brews:
     repository:
       owner: hochfrequenz
       name: homebrew-tap
-    folder: Formula
+    directory: Formula
     homepage: "https://github.com/hochfrequenz/claude-plan-orchestrator"
     description: "Autonomous development orchestrator for Claude Code agents"
     license: "MIT"
