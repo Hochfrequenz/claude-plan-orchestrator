@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 )
 
 var (
@@ -236,23 +237,70 @@ func (m Model) renderQueued() string {
 		return b.String()
 	}
 
-	limit := 5
-	if len(m.queued) < limit {
-		limit = len(m.queued)
+	// Get in-progress task IDs from currently running agents
+	inProgress := make(map[string]bool)
+	for _, a := range m.agents {
+		if a.Status == executor.AgentRunning {
+			inProgress[a.TaskID] = true
+		}
 	}
 
-	for i := 0; i < limit; i++ {
-		task := m.queued[i]
-		waiting := ""
-		if len(task.DependsOn) > 0 {
-			waiting = fmt.Sprintf("(waiting: %s)", task.DependsOn[0].String())
-		} else {
-			waiting = "(ready)"
+	// Use scheduler to get tasks in priority order, respecting dependencies
+	sched := scheduler.New(m.queued, m.completedTasks)
+	readyTasks := sched.GetReadyTasksExcluding(len(m.queued), inProgress)
+
+	// Build a set of ready task IDs for quick lookup
+	readySet := make(map[string]bool)
+	for _, t := range readyTasks {
+		readySet[t.ID.String()] = true
+	}
+
+	// Show ready tasks first (in scheduler priority order), then blocked tasks
+	shown := 0
+	limit := 5
+
+	// First show ready tasks
+	for _, task := range readyTasks {
+		if shown >= limit {
+			break
 		}
-		line := fmt.Sprintf("  ○ %-15s %-20s %s",
-			task.ID.String(), truncate(task.Title, 20), waiting)
+		line := fmt.Sprintf("  ● %-15s %-20s %s",
+			task.ID.String(), truncate(task.Title, 20), runningStyle.Render("(ready)"))
 		b.WriteString(queuedStyle.Render(line))
 		b.WriteString("\n")
+		shown++
+	}
+
+	// Then show blocked tasks if we have room
+	if shown < limit {
+		for _, task := range m.queued {
+			if shown >= limit {
+				break
+			}
+			if readySet[task.ID.String()] {
+				continue // Already shown above
+			}
+			// Find what's blocking this task
+			blocking := ""
+			for _, dep := range task.DependsOn {
+				if !m.completedTasks[dep.String()] {
+					blocking = dep.String()
+					break
+				}
+			}
+			if blocking == "" && inProgress[task.ID.String()] {
+				blocking = "in progress"
+			}
+			if blocking == "" {
+				// Blocked by implicit module dependency or in-progress task
+				blocking = "dependency"
+			}
+			line := fmt.Sprintf("  ○ %-15s %-20s %s",
+				task.ID.String(), truncate(task.Title, 20), warningStyle.Render(fmt.Sprintf("(waiting: %s)", blocking)))
+			b.WriteString(queuedStyle.Render(line))
+			b.WriteString("\n")
+			shown++
+		}
 	}
 
 	return strings.TrimSuffix(b.String(), "\n")
