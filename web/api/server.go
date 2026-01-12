@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/web/ui"
 )
 
 // Store interface for database operations
@@ -44,8 +46,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/agents", s.listAgentsHandler())
 	s.mux.HandleFunc("/api/events", s.sseHandler())
 
-	// Static files (Svelte build output)
-	s.mux.Handle("/", http.FileServer(http.Dir("web/ui/build")))
+	// Static files (embedded Svelte build output)
+	buildFS, _ := fs.Sub(ui.BuildFS, "build")
+	s.mux.Handle("/", http.FileServer(http.FS(buildFS)))
 }
 
 // Start starts the HTTP server
