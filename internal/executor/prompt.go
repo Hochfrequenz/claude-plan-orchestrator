@@ -27,6 +27,7 @@ Instructions:
 7. Commit all changes with a descriptive commit message
 8. Push the branch to remote: git push -u origin HEAD
 9. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
+10. Merge the PR using: gh pr merge --squash --delete-branch
 
 Epic file format when complete:
 ---
