@@ -36,8 +36,6 @@ archives:
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
-    builds:
-      - claude-orch
     files:
       - README.md
       - LICENSE*
