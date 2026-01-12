@@ -281,6 +281,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		AllTasks:    allTasks,
 		Queued:      queued,
 		ProjectRoot: cfg.General.ProjectRoot,
+		WorktreeDir: cfg.General.WorktreeDir,
 	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
