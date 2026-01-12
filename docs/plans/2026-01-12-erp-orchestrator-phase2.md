@@ -19,10 +19,10 @@
 | 8.1 Create Sync Package | DONE |
 | 9.1 Create Batch Scheduler | DONE |
 | 10.1 Create Notification System | DONE |
-| 11.1 Create HTTP API | TODO |
+| 11.1 Create HTTP API | DONE |
 | 12.1 Create Svelte Web UI | TODO |
 
-**Next task to implement:** Task 11.1: Create HTTP API
+**Next task to implement:** Task 12.1: Create Svelte Web UI
 
 ---
 
@@ -1099,7 +1099,7 @@ git commit -m "feat(notify): add desktop and Slack notifications"
 
 ## Phase 11: Web UI API
 
-### Task 11.1: Create HTTP API
+### Task 11.1: Create HTTP API [DONE]
 
 **Files:**
 - Create: `web/api/server.go`

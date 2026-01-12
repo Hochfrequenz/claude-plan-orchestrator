@@ -11,6 +11,7 @@ import (
 	"github.com/anthropics/erp-orchestrator/internal/scheduler"
 	"github.com/anthropics/erp-orchestrator/internal/taskstore"
 	"github.com/anthropics/erp-orchestrator/tui"
+	"github.com/anthropics/erp-orchestrator/web/api"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,7 @@ var (
 	startModule string
 	listStatus  string
 	listModule  string
+	servePort   int
 )
 
 func init() {
@@ -75,6 +77,15 @@ func init() {
 		RunE:  runTUI,
 	}
 	rootCmd.AddCommand(tuiCmd)
+
+	// serve command
+	serveCmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start web UI server",
+		RunE:  runServe,
+	}
+	serveCmd.Flags().IntVar(&servePort, "port", 8080, "port to listen on")
+	rootCmd.AddCommand(serveCmd)
 }
 
 func loadConfig() (*config.Config, error) {
@@ -258,4 +269,41 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// storeAdapter wraps taskstore.Store to implement api.Store
+type storeAdapter struct {
+	store *taskstore.Store
+}
+
+func (a *storeAdapter) ListTasks(opts interface{}) ([]*domain.Task, error) {
+	return a.store.ListTasks(taskstore.ListOptions{})
+}
+
+func (a *storeAdapter) GetTask(id string) (*domain.Task, error) {
+	return a.store.GetTask(id)
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	store, err := taskstore.New(cfg.General.DatabasePath)
+	if err != nil {
+		return err
+	}
+
+	port := servePort
+	if port == 0 {
+		port = cfg.Web.Port
+	}
+
+	addr := fmt.Sprintf("%s:%d", cfg.Web.Host, port)
+	adapter := &storeAdapter{store: store}
+	server := api.NewServer(adapter, nil, addr)
+
+	fmt.Printf("Starting web UI at http://%s\n", addr)
+	return server.Start()
 }
