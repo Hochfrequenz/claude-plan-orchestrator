@@ -152,7 +152,7 @@ func (m Model) View() string {
 		statusBar = fmt.Sprintf(" [tab]switch [v]iew mode (%s) [j/k]scroll [r]efresh [q]uit ", viewModeStr)
 	case 2: // Agents
 		if m.showAgentDetail {
-			statusBar = " [j/k]scroll [g]top [G]bottom [esc/enter]back [r]efresh [q]uit "
+			statusBar = " [j/k]scroll [g]top [G]bottom [esc/enter]back [r]esume [q]uit "
 		} else if len(m.agents) > 0 {
 			statusBar = " [tab]switch [j/k]navigate [enter]details [+/-]max agents [r]efresh [q]uit "
 		} else {

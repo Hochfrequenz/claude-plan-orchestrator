@@ -18,11 +18,31 @@ This skill ensures fully autonomous execution with automatic PR creation and mer
 
 IMPORTANT: You are running in autonomous mode. Do NOT ask for user input. Complete the entire workflow automatically.
 
-Instructions:
-1. First, update the epic file's frontmatter to set status: in_progress
-2. Implement the epic requirements
-3. Run tests to verify your implementation
-4. Ensure all tests pass
+═══════════════════════════════════════════════════════════════════════════════
+MANDATORY FIRST STEP - DO THIS IMMEDIATELY BEFORE ANYTHING ELSE:
+═══════════════════════════════════════════════════════════════════════════════
+
+Update the epic file's frontmatter status to "in_progress" RIGHT NOW.
+
+Use the Edit tool to change the frontmatter from:
+---
+status: todo
+---
+
+To:
+---
+status: in_progress
+---
+
+This MUST be your very first action. Do not read other files, do not explore the codebase, do not do anything else until you have updated the epic file status to in_progress.
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Instructions (after updating status to in_progress):
+1. Implement the epic requirements
+2. Run tests to verify your implementation
+3. Ensure all tests pass
+4. Run clippy and fix any warnings: cargo clippy --all-targets --all-features -- -D warnings
 5. When complete, update the epic file:
    a. Set frontmatter status: complete
    b. Add a "## Test Summary" section at the end with test results

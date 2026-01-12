@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -364,6 +365,107 @@ func (a *Agent) streamOutput(stdout, stderr io.ReadCloser) {
 	}
 }
 
+// CheckEpicStatus reads the epic file in the worktree and returns its current status
+// This is useful before resuming to see if the task was already completed
+func (a *Agent) CheckEpicStatus() (domain.TaskStatus, error) {
+	epicPath, err := a.findEpicFile()
+	if err != nil {
+		return domain.StatusNotStarted, err
+	}
+
+	content, err := os.ReadFile(epicPath)
+	if err != nil {
+		return domain.StatusNotStarted, fmt.Errorf("reading epic file: %w", err)
+	}
+
+	// Parse frontmatter to get status
+	fm, _, err := parseSimpleFrontmatter(content)
+	if err != nil {
+		return domain.StatusNotStarted, fmt.Errorf("parsing frontmatter: %w", err)
+	}
+
+	return toStatus(fm.Status), nil
+}
+
+// findEpicFile locates the epic markdown file in the worktree
+func (a *Agent) findEpicFile() (string, error) {
+	if a.WorktreePath == "" {
+		return "", fmt.Errorf("no worktree path set")
+	}
+
+	// Look in docs/plans directories for epic files matching this task
+	plansDir := filepath.Join(a.WorktreePath, "docs", "plans")
+	epicPattern := regexp.MustCompile(fmt.Sprintf(`epic-0*%d-.*\.md$`, a.TaskID.EpicNum))
+
+	var foundPath string
+	filepath.Walk(plansDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		base := filepath.Base(path)
+		// Check if this is our epic file (matching module and epic number)
+		if epicPattern.MatchString(base) {
+			// Check if directory contains our module
+			dir := filepath.Base(filepath.Dir(path))
+			if strings.Contains(dir, a.TaskID.Module) || strings.HasPrefix(dir, a.TaskID.Module) {
+				foundPath = path
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+
+	if foundPath == "" {
+		return "", fmt.Errorf("epic file not found for task %s", a.TaskID.String())
+	}
+	return foundPath, nil
+}
+
+// simpleFrontmatter is a minimal struct to extract just the status field
+type simpleFrontmatter struct {
+	Status string `yaml:"status"`
+}
+
+// parseSimpleFrontmatter extracts just the status from YAML frontmatter
+func parseSimpleFrontmatter(content []byte) (*simpleFrontmatter, []byte, error) {
+	if !strings.HasPrefix(string(content), "---\n") {
+		return &simpleFrontmatter{}, content, nil
+	}
+
+	rest := content[4:]
+	endIdx := strings.Index(string(rest), "\n---")
+	if endIdx == -1 {
+		return &simpleFrontmatter{}, content, nil
+	}
+
+	fmData := rest[:endIdx]
+	remaining := rest[endIdx+4:]
+
+	// Simple line-by-line parsing for status field
+	var fm simpleFrontmatter
+	for _, line := range strings.Split(string(fmData), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "status:") {
+			fm.Status = strings.TrimSpace(strings.TrimPrefix(line, "status:"))
+			break
+		}
+	}
+
+	return &fm, remaining, nil
+}
+
+// toStatus converts a string to a TaskStatus
+func toStatus(s string) domain.TaskStatus {
+	switch s {
+	case "in_progress", "inprogress", "in-progress", "running":
+		return domain.StatusInProgress
+	case "complete", "completed", "done":
+		return domain.StatusComplete
+	default:
+		return domain.StatusNotStarted
+	}
+}
+
 // Resume restarts the agent by resuming its Claude Code session
 // This continues from where the previous session left off
 func (a *Agent) Resume(ctx context.Context) error {
@@ -375,11 +477,23 @@ func (a *Agent) Resume(ctx context.Context) error {
 		return fmt.Errorf("can only resume completed or failed agents, current status: %s", a.Status)
 	}
 
+	// Check epic status - if already complete, no need to resume
+	a.mu.Unlock() // Temporarily unlock for file I/O
+	epicStatus, err := a.CheckEpicStatus()
+	a.mu.Lock() // Re-acquire lock
+	if err == nil && epicStatus == domain.StatusComplete {
+		return fmt.Errorf("task already complete (epic status: complete)")
+	}
+
 	// Must have a session ID to resume
 	if a.SessionID == "" {
 		// Generate deterministic UUID based on task ID
 		a.SessionID = uuid.NewSHA1(orchestratorNamespace, []byte(a.TaskID.String())).String()
 	}
+
+	// Clear previous output to avoid mixing formats
+	// (session file uses [assistant] format, stream uses raw JSON)
+	a.Output = nil
 
 	// Re-open or create log file (append mode)
 	logPath := filepath.Join(a.WorktreePath, ".claude-agent.log")

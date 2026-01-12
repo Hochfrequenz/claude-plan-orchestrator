@@ -149,17 +149,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.agentOutputScroll = 0
 			}
 		case "r":
-			// Resume/restart selected agent (only on Agents tab)
-			if m.activeTab == 2 && len(m.agents) > 0 && m.selectedAgent < len(m.agents) {
-				av := m.agents[m.selectedAgent]
-				// Can only resume completed or failed agents
-				if av.Status == executor.AgentCompleted || av.Status == executor.AgentFailed {
-					m.statusMsg = fmt.Sprintf("Resuming agent %s...", av.TaskID)
-					return m, resumeAgentCmd(m.agentManager, av.TaskID)
-				} else if av.Status == executor.AgentRunning {
-					m.statusMsg = "Agent is already running"
+			// On Agents tab: refresh in overview, resume in detail view
+			if m.activeTab == 2 {
+				if m.showAgentDetail && len(m.agents) > 0 && m.selectedAgent < len(m.agents) {
+					// Detail view: resume the agent
+					av := m.agents[m.selectedAgent]
+					// Can only resume completed or failed agents
+					if av.Status == executor.AgentCompleted || av.Status == executor.AgentFailed {
+						m.statusMsg = fmt.Sprintf("Resuming agent %s...", av.TaskID)
+						return m, resumeAgentCmd(m.agentManager, av.TaskID)
+					} else if av.Status == executor.AgentRunning {
+						m.statusMsg = "Agent is already running"
+					} else {
+						m.statusMsg = "Cannot resume agent in this state"
+					}
 				} else {
-					m.statusMsg = "Cannot resume agent in this state"
+					// Overview: refresh agent list
+					m.updateAgentsFromManager()
+					m.statusMsg = "Agents refreshed"
 				}
 			}
 		case "tab":
@@ -352,19 +359,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AgentCompleteMsg:
 		// Handle agent completion
+		var completedIdx int = -1
 		for i, a := range m.agents {
 			if a.TaskID == msg.TaskID {
 				if msg.Success {
-					m.agents[i].Status = executor.AgentCompleted
 					// Mark task as completed for dependency tracking
 					if m.completedTasks == nil {
 						m.completedTasks = make(map[string]bool)
 					}
 					m.completedTasks[msg.TaskID] = true
+					// Mark for removal from agents list
+					completedIdx = i
 				} else {
 					m.agents[i].Status = executor.AgentFailed
 				}
 				break
+			}
+		}
+		// Remove successfully completed agent from the list
+		if completedIdx >= 0 {
+			m.agents = append(m.agents[:completedIdx], m.agents[completedIdx+1:]...)
+			// Adjust selected agent index if needed
+			if m.selectedAgent >= len(m.agents) && m.selectedAgent > 0 {
+				m.selectedAgent--
 			}
 		}
 		// Update active count
@@ -539,7 +556,10 @@ func (m *Model) updateAgentsFromManager() {
 	m.activeCount = 0
 	allDone := true
 
-	for _, av := range m.agents {
+	// Track agents to remove (completed successfully)
+	var toRemove []int
+
+	for i, av := range m.agents {
 		agent := m.agentManager.Get(av.TaskID)
 		if agent == nil {
 			continue
@@ -577,6 +597,8 @@ func (m *Model) updateAgentsFromManager() {
 				m.completedTasks = make(map[string]bool)
 			}
 			m.completedTasks[av.TaskID] = true
+			// Mark for removal from agents list
+			toRemove = append(toRemove, i)
 		}
 
 		if agent.Status == executor.AgentRunning {
@@ -584,6 +606,19 @@ func (m *Model) updateAgentsFromManager() {
 			allDone = false
 		} else if agent.Status == executor.AgentQueued {
 			allDone = false
+		}
+	}
+
+	// Remove completed agents (iterate in reverse to maintain correct indices)
+	for i := len(toRemove) - 1; i >= 0; i-- {
+		idx := toRemove[i]
+		m.agents = append(m.agents[:idx], m.agents[idx+1:]...)
+	}
+	// Adjust selected agent index if needed
+	if len(toRemove) > 0 && m.selectedAgent >= len(m.agents) && m.selectedAgent > 0 {
+		m.selectedAgent = len(m.agents) - 1
+		if m.selectedAgent < 0 {
+			m.selectedAgent = 0
 		}
 	}
 
