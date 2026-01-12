@@ -48,9 +48,9 @@ func Default() *Config {
 	return &Config{
 		General: GeneralConfig{
 			ProjectRoot:       "",
-			WorktreeDir:       filepath.Join(home, ".erp-orchestrator", "worktrees"),
+			WorktreeDir:       filepath.Join(home, ".claude-orchestrator", "worktrees"),
 			MaxParallelAgents: 3,
-			DatabasePath:      filepath.Join(home, ".erp-orchestrator", "orchestrator.db"),
+			DatabasePath:      filepath.Join(home, ".claude-orchestrator", "orchestrator.db"),
 		},
 		Claude: ClaudeConfig{
 			Model:     "claude-sonnet-4-20250514",
@@ -102,5 +102,5 @@ func ExpandPath(path string) string {
 // DefaultConfigPath returns the default config file location
 func DefaultConfigPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "erp-orchestrator", "config.toml")
+	return filepath.Join(home, ".config", "claude-orchestrator", "config.toml")
 }
