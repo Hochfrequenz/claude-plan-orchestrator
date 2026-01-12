@@ -13,6 +13,8 @@ Epic file: %s
 %s
 Dependencies completed: %s
 
+IMPORTANT: You are running in autonomous mode. Do NOT ask for user input. Complete the entire workflow automatically.
+
 Instructions:
 1. First, update the epic file's frontmatter to set status: in_progress
 2. Implement the epic requirements
@@ -22,7 +24,9 @@ Instructions:
    a. Set frontmatter status: complete
    b. Add a "## Test Summary" section at the end with test results
 6. Update the README.md in the plans directory: change the status emoji for this epic from 🔴 or 🟡 to 🟢
-7. Create a summary of changes made
+7. Commit all changes with a descriptive commit message
+8. Push the branch to remote: git push -u origin HEAD
+9. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
 
 Epic file format when complete:
 ---
@@ -48,6 +52,7 @@ Files tested:
 - path/to/file2.go
 
 Do not ask for clarification. Make reasonable decisions based on the epic content.
+Do not use any skills that ask for user input. Complete all steps automatically.
 `
 
 // BuildPrompt constructs the task prompt for Claude Code
