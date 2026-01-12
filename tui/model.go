@@ -51,6 +51,8 @@ type Model struct {
 	viewMode       ViewMode
 	taskScroll     int
 	selectedModule int
+	selectedAgent  int
+	showAgentDetail bool
 	testRunning    bool
 	testOutput     string
 
@@ -76,11 +78,14 @@ type Model struct {
 
 // AgentView represents an agent in the TUI
 type AgentView struct {
-	TaskID   string
-	Title    string
-	Duration time.Duration
-	Status   executor.AgentStatus
-	Progress string
+	TaskID       string
+	Title        string
+	Duration     time.Duration
+	Status       executor.AgentStatus
+	Progress     string
+	WorktreePath string
+	Error        string
+	Output       []string // Last N lines of output
 }
 
 // FlaggedPR represents a PR needing attention

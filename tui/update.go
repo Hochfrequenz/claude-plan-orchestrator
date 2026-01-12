@@ -17,11 +17,17 @@ type TestCompleteMsg struct {
 	Err    error
 }
 
+// AgentStartInfo holds info about an agent that was started
+type AgentStartInfo struct {
+	TaskID       string
+	WorktreePath string
+}
+
 // BatchStartMsg is sent to start a batch of tasks
 type BatchStartMsg struct {
 	Count   int
-	Started []string // Task IDs that were started
-	Errors  []string // Any errors during startup
+	Started []AgentStartInfo // Agents that were started
+	Errors  []string         // Any errors during startup
 }
 
 // BatchPauseMsg is sent to pause batch execution
@@ -61,6 +67,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == 1 {
 				m.taskScroll++
 			}
+			if m.activeTab == 2 { // Agents tab
+				if m.selectedAgent < len(m.agents)-1 {
+					m.selectedAgent++
+				}
+			}
 			if m.activeTab == 3 { // Modules tab
 				if m.selectedModule < len(m.modules)-1 {
 					m.selectedModule++
@@ -78,6 +89,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == 1 && m.taskScroll > 0 {
 				m.taskScroll--
 			}
+			if m.activeTab == 2 { // Agents tab
+				if m.selectedAgent > 0 {
+					m.selectedAgent--
+				}
+			}
 			if m.activeTab == 3 { // Modules tab
 				if m.selectedModule > 0 {
 					m.selectedModule--
@@ -86,6 +102,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selectedModule < m.taskScroll {
 					m.taskScroll = m.selectedModule
 				}
+			}
+		case "enter":
+			// Toggle agent detail view (only on Agents tab)
+			if m.activeTab == 2 && len(m.agents) > 0 {
+				m.showAgentDetail = !m.showAgentDetail
+			}
+		case "esc":
+			// Close agent detail view
+			if m.activeTab == 2 {
+				m.showAgentDetail = false
 			}
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % 5
@@ -240,20 +266,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case BatchStartMsg:
 		// Batch has been initiated - add agents to view
-		for _, taskID := range msg.Started {
+		for _, info := range msg.Started {
 			// Find the task to get its title
 			var title string
 			for _, t := range m.queued {
-				if t.ID.String() == taskID {
+				if t.ID.String() == info.TaskID {
 					title = t.Title
 					break
 				}
 			}
 			m.agents = append(m.agents, &AgentView{
-				TaskID:   taskID,
-				Title:    title,
-				Status:   executor.AgentRunning,
-				Duration: 0,
+				TaskID:       info.TaskID,
+				Title:        title,
+				Status:       executor.AgentRunning,
+				Duration:     0,
+				WorktreePath: info.WorktreePath,
 			})
 			m.activeCount++
 		}
@@ -261,8 +288,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var remaining []*domain.Task
 		for _, t := range m.queued {
 			started := false
-			for _, startedID := range msg.Started {
-				if t.ID.String() == startedID {
+			for _, info := range msg.Started {
+				if t.ID.String() == info.TaskID {
 					started = true
 					break
 				}
@@ -275,6 +302,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if len(msg.Errors) > 0 {
 			m.statusMsg = fmt.Sprintf("Batch started: %d task(s), %d error(s)", msg.Count, len(msg.Errors))
+			// Show the first error in status
+			if len(msg.Errors) == 1 {
+				m.statusMsg = fmt.Sprintf("Error: %s", msg.Errors[0])
+			}
 		} else {
 			m.statusMsg = fmt.Sprintf("Batch started: %d task(s)", msg.Count)
 		}
@@ -289,7 +320,7 @@ func (m *Model) SetAgents(agents []*AgentView) {
 	m.agents = agents
 	m.activeCount = 0
 	for _, a := range agents {
-		if a.Status == "running" {
+		if a.Status == executor.AgentRunning {
 			m.activeCount++
 		}
 	}
@@ -323,6 +354,21 @@ func (m *Model) updateAgentsFromManager() {
 
 		av.Status = agent.Status
 		av.Duration = agent.Duration()
+		av.WorktreePath = agent.WorktreePath
+
+		// Capture error if any
+		if agent.Error != nil {
+			av.Error = agent.Error.Error()
+		}
+
+		// Capture last N lines of output
+		output := agent.GetOutput()
+		maxLines := 20
+		if len(output) > maxLines {
+			av.Output = output[len(output)-maxLines:]
+		} else {
+			av.Output = output
+		}
 
 		if agent.Status == executor.AgentRunning {
 			m.activeCount++
@@ -429,7 +475,7 @@ func startBatchCmd(
 	agentMgr *executor.AgentManager,
 ) tea.Cmd {
 	return func() tea.Msg {
-		var started []string
+		var started []AgentStartInfo
 		var errors []string
 
 		for _, task := range tasks {
@@ -439,7 +485,7 @@ func startBatchCmd(
 			if wtMgr != nil {
 				wtPath, err = wtMgr.Create(task.ID)
 				if err != nil {
-					errors = append(errors, fmt.Sprintf("%s: %v", task.ID.String(), err))
+					errors = append(errors, fmt.Sprintf("%s: worktree: %v", task.ID.String(), err))
 					continue
 				}
 			} else {
@@ -464,14 +510,21 @@ func startBatchCmd(
 				// Start the agent if we can
 				if agentMgr.CanStart() {
 					if err := agent.Start(context.Background()); err != nil {
-						errors = append(errors, fmt.Sprintf("%s: %v", task.ID.String(), err))
+						errors = append(errors, fmt.Sprintf("%s: start: %v", task.ID.String(), err))
 						agentMgr.Remove(task.ID.String())
+						// Clean up worktree on failure
+						if wtMgr != nil {
+							wtMgr.Remove(wtPath)
+						}
 						continue
 					}
 				}
 			}
 
-			started = append(started, task.ID.String())
+			started = append(started, AgentStartInfo{
+				TaskID:       task.ID.String(),
+				WorktreePath: wtPath,
+			})
 		}
 
 		return BatchStartMsg{

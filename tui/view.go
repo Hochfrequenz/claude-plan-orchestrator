@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 )
 
 var (
@@ -148,7 +149,13 @@ func (m Model) View() string {
 		}
 		statusBar = fmt.Sprintf(" [tab]switch [v]iew mode (%s) [j/k]scroll [r]efresh [q]uit ", viewModeStr)
 	case 2: // Agents
-		statusBar = " [tab]switch [+/-]max agents [r]efresh [q]uit "
+		if m.showAgentDetail {
+			statusBar = " [esc/enter]back [r]efresh [q]uit "
+		} else if len(m.agents) > 0 {
+			statusBar = " [tab]switch [j/k]navigate [enter]details [+/-]max agents [r]efresh [q]uit "
+		} else {
+			statusBar = " [tab]switch [+/-]max agents [r]efresh [q]uit "
+		}
 	case 3: // Modules
 		statusBar = " [tab]switch [j/k]scroll [x]run tests [r]efresh [q]uit "
 	default:
@@ -175,13 +182,43 @@ func (m Model) renderRunning() string {
 		return b.String()
 	}
 
+	hasRunning := false
 	for _, agent := range m.agents {
-		if agent.Status == "running" {
+		if agent.Status == executor.AgentRunning {
+			hasRunning = true
 			line := fmt.Sprintf("  ● %-15s %-20s %5s  %s",
 				agent.TaskID, truncate(agent.Title, 20),
 				formatDuration(agent.Duration), agent.Progress)
 			b.WriteString(runningStyle.Render(line))
 			b.WriteString("\n")
+		}
+	}
+
+	// Also show failed agents with errors on dashboard
+	for _, agent := range m.agents {
+		if agent.Status == executor.AgentFailed {
+			errMsg := agent.Error
+			if errMsg == "" {
+				errMsg = "unknown error"
+			}
+			line := fmt.Sprintf("  ✗ %-15s %-20s %s",
+				agent.TaskID, truncate(agent.Title, 20), truncate(errMsg, 30))
+			b.WriteString(warningStyle.Render(line))
+			b.WriteString("\n")
+		}
+	}
+
+	if !hasRunning && len(m.agents) > 0 {
+		// Check if all are done
+		allDone := true
+		for _, a := range m.agents {
+			if a.Status == executor.AgentQueued || a.Status == executor.AgentRunning {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			b.WriteString(queuedStyle.Render("  All agents completed"))
 		}
 	}
 
@@ -427,6 +464,12 @@ func (m Model) formatTaskLine(task *domain.Task) string {
 
 func (m Model) renderAgentsDetail() string {
 	var b strings.Builder
+
+	// If showing agent detail, render that instead
+	if m.showAgentDetail && len(m.agents) > 0 && m.selectedAgent < len(m.agents) {
+		return m.renderSelectedAgentDetail()
+	}
+
 	b.WriteString(titleStyle.Render("AGENTS"))
 	b.WriteString("\n\n")
 
@@ -441,42 +484,138 @@ func (m Model) renderAgentsDetail() string {
 	b.WriteString("\n\n")
 
 	// Active agents section
-	b.WriteString(titleStyle.Render(fmt.Sprintf("RUNNING (%d/%d)", m.activeCount, m.maxActive)))
+	b.WriteString(titleStyle.Render(fmt.Sprintf("AGENTS (%d/%d running)", m.activeCount, m.maxActive)))
 	b.WriteString("\n")
 
 	if len(m.agents) == 0 {
-		b.WriteString(queuedStyle.Render("  No agents running"))
+		b.WriteString(queuedStyle.Render("  No agents. Press [s] on Dashboard to start a batch."))
 		b.WriteString("\n")
 	} else {
-		for _, agent := range m.agents {
+		for i, agent := range m.agents {
 			var statusIcon string
 			var style lipgloss.Style
 			switch agent.Status {
-			case "running":
+			case executor.AgentRunning:
 				statusIcon = "●"
 				style = runningStyle
-			case "completed":
+			case executor.AgentCompleted:
 				statusIcon = "✓"
 				style = completedStyle
+			case executor.AgentFailed:
+				statusIcon = "✗"
+				style = warningStyle
+			case executor.AgentStuck:
+				statusIcon = "⚠"
+				style = warningStyle
 			default:
 				statusIcon = "○"
 				style = queuedStyle
 			}
 
-			line := fmt.Sprintf("  %s %-15s %-25s %8s  %s",
-				statusIcon, agent.TaskID, truncate(agent.Title, 25),
-				formatDuration(agent.Duration), agent.Progress)
-			b.WriteString(style.Render(line))
+			// Show error preview for failed agents
+			extra := agent.Progress
+			if agent.Status == executor.AgentFailed && agent.Error != "" {
+				extra = truncate(agent.Error, 25)
+			}
+
+			line := fmt.Sprintf("  %s %-15s %-20s %8s  %s",
+				statusIcon, agent.TaskID, truncate(agent.Title, 20),
+				formatDuration(agent.Duration), extra)
+
+			// Highlight selected agent
+			if i == m.selectedAgent {
+				line = fmt.Sprintf("> %s", line[2:])
+				b.WriteString(tabActiveStyle.Render(line))
+			} else {
+				b.WriteString(style.Render(line))
+			}
 			b.WriteString("\n")
 		}
 	}
 
 	// Slots available
 	slotsAvailable := m.maxActive - m.activeCount
-	if slotsAvailable > 0 {
+	if slotsAvailable > 0 && len(m.agents) > 0 {
 		b.WriteString("\n")
 		b.WriteString(queuedStyle.Render(fmt.Sprintf("  %d slot(s) available for new agents", slotsAvailable)))
 	}
+
+	if len(m.agents) > 0 {
+		b.WriteString("\n")
+		b.WriteString(queuedStyle.Render("  Press [enter] to view agent details, [j/k] to navigate"))
+	}
+
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func (m Model) renderSelectedAgentDetail() string {
+	var b strings.Builder
+	agent := m.agents[m.selectedAgent]
+
+	b.WriteString(titleStyle.Render(fmt.Sprintf("AGENT DETAIL: %s", agent.TaskID)))
+	b.WriteString("\n\n")
+
+	// Status
+	var statusStr string
+	var style lipgloss.Style
+	switch agent.Status {
+	case executor.AgentRunning:
+		statusStr = "Running"
+		style = runningStyle
+	case executor.AgentCompleted:
+		statusStr = "Completed"
+		style = completedStyle
+	case executor.AgentFailed:
+		statusStr = "Failed"
+		style = warningStyle
+	case executor.AgentStuck:
+		statusStr = "Stuck"
+		style = warningStyle
+	case executor.AgentQueued:
+		statusStr = "Queued"
+		style = queuedStyle
+	default:
+		statusStr = string(agent.Status)
+		style = queuedStyle
+	}
+
+	b.WriteString(fmt.Sprintf("  Status:   %s\n", style.Render(statusStr)))
+	b.WriteString(fmt.Sprintf("  Task:     %s\n", agent.Title))
+	b.WriteString(fmt.Sprintf("  Duration: %s\n", formatDuration(agent.Duration)))
+	if agent.WorktreePath != "" {
+		b.WriteString(fmt.Sprintf("  Worktree: %s\n", agent.WorktreePath))
+	}
+
+	// Error section
+	if agent.Error != "" {
+		b.WriteString("\n")
+		b.WriteString(warningStyle.Render("  ERROR:"))
+		b.WriteString("\n")
+		b.WriteString(warningStyle.Render(fmt.Sprintf("  %s", agent.Error)))
+		b.WriteString("\n")
+	}
+
+	// Output section
+	if len(agent.Output) > 0 {
+		b.WriteString("\n")
+		b.WriteString(titleStyle.Render("  OUTPUT (last lines):"))
+		b.WriteString("\n")
+		for _, line := range agent.Output {
+			// Truncate long lines
+			if len(line) > 80 {
+				line = line[:77] + "..."
+			}
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s", line)))
+			b.WriteString("\n")
+		}
+	} else if agent.Status == executor.AgentFailed {
+		b.WriteString("\n")
+		b.WriteString(queuedStyle.Render("  No output captured"))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(queuedStyle.Render("  Press [esc] or [enter] to go back"))
 
 	return strings.TrimSuffix(b.String(), "\n")
 }

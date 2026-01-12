@@ -650,8 +650,10 @@ func TestModel_BatchStartMsgWithTasks(t *testing.T) {
 
 	// Simulate batch start with one task started
 	newModel, _ := model.Update(BatchStartMsg{
-		Count:   1,
-		Started: []string{"test/E00"},
+		Count: 1,
+		Started: []AgentStartInfo{
+			{TaskID: "test/E00", WorktreePath: "/tmp/worktree"},
+		},
 	})
 	model = newModel.(Model)
 
@@ -666,6 +668,10 @@ func TestModel_BatchStartMsgWithTasks(t *testing.T) {
 
 	if model.agents[0].Title != "Task 0" {
 		t.Errorf("agents[0].Title = %q, want 'Task 0'", model.agents[0].Title)
+	}
+
+	if model.agents[0].WorktreePath != "/tmp/worktree" {
+		t.Errorf("agents[0].WorktreePath = %q, want '/tmp/worktree'", model.agents[0].WorktreePath)
 	}
 
 	// Verify task was removed from queued
@@ -709,5 +715,95 @@ func TestModel_UpdateAgentsFromManager(t *testing.T) {
 
 	if model.activeCount != 1 {
 		t.Errorf("activeCount = %d, want 1", model.activeCount)
+	}
+}
+
+func TestModel_AgentSelection(t *testing.T) {
+	agents := []*AgentView{
+		{TaskID: "test/E00", Status: executor.AgentRunning},
+		{TaskID: "test/E01", Status: executor.AgentCompleted},
+		{TaskID: "test/E02", Status: executor.AgentFailed, Error: "test error"},
+	}
+	model := NewModel(ModelConfig{MaxActive: 3, Agents: agents})
+	model.width = 100
+	model.height = 40
+	model.activeTab = 2 // Agents tab
+
+	// Navigate down
+	newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	model = newModel.(Model)
+
+	if model.selectedAgent != 1 {
+		t.Errorf("selectedAgent = %d, want 1", model.selectedAgent)
+	}
+
+	// Navigate up
+	newModel, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	model = newModel.(Model)
+
+	if model.selectedAgent != 0 {
+		t.Errorf("selectedAgent = %d, want 0", model.selectedAgent)
+	}
+}
+
+func TestModel_AgentDetailToggle(t *testing.T) {
+	agents := []*AgentView{
+		{TaskID: "test/E00", Status: executor.AgentFailed, Error: "test error"},
+	}
+	model := NewModel(ModelConfig{MaxActive: 3, Agents: agents})
+	model.width = 100
+	model.height = 40
+	model.activeTab = 2 // Agents tab
+
+	// Toggle detail view with enter
+	newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = newModel.(Model)
+
+	if !model.showAgentDetail {
+		t.Error("showAgentDetail should be true after enter")
+	}
+
+	// Toggle off with enter
+	newModel, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = newModel.(Model)
+
+	if model.showAgentDetail {
+		t.Error("showAgentDetail should be false after second enter")
+	}
+
+	// Toggle on and close with esc
+	newModel, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = newModel.(Model)
+	newModel, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = newModel.(Model)
+
+	if model.showAgentDetail {
+		t.Error("showAgentDetail should be false after esc")
+	}
+}
+
+func TestModel_AgentViewHasErrorAndOutput(t *testing.T) {
+	agents := []*AgentView{
+		{
+			TaskID:       "test/E00",
+			Status:       executor.AgentFailed,
+			Error:        "command failed: exit code 1",
+			Output:       []string{"line 1", "line 2", "error output"},
+			WorktreePath: "/tmp/worktree/test",
+		},
+	}
+	model := NewModel(ModelConfig{MaxActive: 3, Agents: agents})
+
+	// Verify fields are preserved
+	if model.agents[0].Error != "command failed: exit code 1" {
+		t.Errorf("Error = %q, want 'command failed: exit code 1'", model.agents[0].Error)
+	}
+
+	if len(model.agents[0].Output) != 3 {
+		t.Errorf("len(Output) = %d, want 3", len(model.agents[0].Output))
+	}
+
+	if model.agents[0].WorktreePath != "/tmp/worktree/test" {
+		t.Errorf("WorktreePath = %q, want '/tmp/worktree/test'", model.agents[0].WorktreePath)
 	}
 }
