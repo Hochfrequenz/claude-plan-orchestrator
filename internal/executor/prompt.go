@@ -9,15 +9,24 @@ import (
 
 const promptTemplate = `You are implementing: %s
 
-Epic: %s
+Epic file: %s
 %s
 Dependencies completed: %s
 
 Instructions:
-1. Implement the epic requirements
-2. Run tests to verify your implementation
-3. Ensure all tests pass
-4. When complete, create a summary of changes made
+1. First, update the epic file's frontmatter to set status: in_progress
+2. Implement the epic requirements
+3. Run tests to verify your implementation
+4. Ensure all tests pass
+5. When complete, update the epic file's frontmatter to set status: complete
+6. Update the README.md in the plans directory: change the status emoji for this epic from 🔴 or 🟡 to 🟢
+7. Create a summary of changes made
+
+Status update format in epic frontmatter:
+---
+status: complete
+priority: ...
+---
 
 Do not ask for clarification. Make reasonable decisions based on the epic content.
 `
@@ -34,9 +43,15 @@ func BuildPrompt(task *domain.Task, epicContent, moduleOverview string, complete
 		depsStr = strings.Join(completedDeps, ", ")
 	}
 
+	epicFileInfo := task.FilePath
+	if epicFileInfo == "" {
+		epicFileInfo = fmt.Sprintf("%s/E%02d", task.ID.Module, task.ID.EpicNum)
+	}
+	epicFileInfo = fmt.Sprintf("%s\n\n%s", epicFileInfo, epicContent)
+
 	return fmt.Sprintf(promptTemplate,
 		task.Title,
-		epicContent,
+		epicFileInfo,
 		moduleCtx,
 		depsStr,
 	)
