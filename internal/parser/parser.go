@@ -18,6 +18,8 @@ var (
 	epicFileRegex  = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)
 	moduleDirRegex = regexp.MustCompile(`^([a-z][a-z0-9-]*)-module$`)
 	titleRegex     = regexp.MustCompile(`^#\s+(.+)$`)
+	// Match table rows like: | E01 | 🟢 | or | E01 | Title | 🟢 |
+	readmeStatusRegex = regexp.MustCompile(`\|\s*E(\d+)\s*\|[^|]*([🔴🟡🟢])`)
 )
 
 // ParseEpicFile parses a single epic markdown file into a Task
@@ -126,7 +128,70 @@ func ParsePlansDir(plansDir string) ([]*domain.Task, error) {
 		allTasks = append(allTasks, tasks...)
 	}
 
+	// Try to read statuses from README.md
+	readmeStatuses := ParseReadmeStatuses(plansDir)
+	if len(readmeStatuses) > 0 {
+		for _, task := range allTasks {
+			// Only override if task doesn't have explicit status in frontmatter
+			// (i.e., it's still NotStarted which is the default)
+			if task.Status == domain.StatusNotStarted {
+				if status, ok := readmeStatuses[task.ID.String()]; ok {
+					task.Status = status
+				}
+			}
+		}
+	}
+
 	return allTasks, nil
+}
+
+// ParseReadmeStatuses reads task statuses from traffic light emojis in README.md
+func ParseReadmeStatuses(plansDir string) map[string]domain.TaskStatus {
+	statuses := make(map[string]domain.TaskStatus)
+
+	readmePath := filepath.Join(plansDir, "README.md")
+	content, err := os.ReadFile(readmePath)
+	if err != nil {
+		return statuses
+	}
+
+	lines := strings.Split(string(content), "\n")
+	currentModule := ""
+
+	// Pattern to match module headers like "## technical-module" or "## Technical Module"
+	moduleHeaderRegex := regexp.MustCompile(`^##\s+([a-zA-Z][a-zA-Z0-9-]*?)(?:-module|[\s-]Module)?(?:\s|$)`)
+
+	for _, line := range lines {
+		// Check for module header
+		if matches := moduleHeaderRegex.FindStringSubmatch(line); matches != nil {
+			currentModule = strings.ToLower(matches[1])
+			continue
+		}
+
+		// Check for status emoji in table row
+		if currentModule != "" {
+			if matches := readmeStatusRegex.FindStringSubmatch(line); matches != nil {
+				epicNum, _ := strconv.Atoi(matches[1])
+				emoji := matches[2]
+
+				taskID := domain.TaskID{Module: currentModule, EpicNum: epicNum}
+				statuses[taskID.String()] = emojiToStatus(emoji)
+			}
+		}
+	}
+
+	return statuses
+}
+
+func emojiToStatus(emoji string) domain.TaskStatus {
+	switch emoji {
+	case "🟢":
+		return domain.StatusComplete
+	case "🟡":
+		return domain.StatusInProgress
+	default:
+		return domain.StatusNotStarted
+	}
 }
 
 // ExtractTaskIDFromPath extracts a TaskID from an epic file path
