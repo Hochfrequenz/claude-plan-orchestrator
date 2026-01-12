@@ -661,10 +661,10 @@ type claudeStreamMessage struct {
 		Content []struct {
 			Type      string `json:"type"`
 			Text      string `json:"text,omitempty"`
-			Name      string `json:"name,omitempty"`       // tool name
-			ToolInput any    `json:"input,omitempty"`      // tool input
+			Name      string `json:"name,omitempty"`  // tool name
+			ToolInput any    `json:"input,omitempty"` // tool input
 			ToolUseID string `json:"tool_use_id,omitempty"`
-			Content   string `json:"content,omitempty"`    // tool result content
+			Content   any    `json:"content,omitempty"` // tool result content (can be string or array)
 		} `json:"content,omitempty"`
 	} `json:"message,omitempty"`
 }
@@ -672,6 +672,65 @@ type claudeStreamMessage struct {
 // Track last tool used for better result display
 var lastToolUsed string
 var lastToolDetail string
+
+// extractToolResultInfo tries to extract useful info from tool result content
+func extractToolResultInfo(content any, maxLen int) string {
+	if maxLen < 10 {
+		maxLen = 10
+	}
+
+	// Handle array of content items (MCP tools return this format)
+	if arr, ok := content.([]any); ok {
+		for _, item := range arr {
+			if obj, ok := item.(map[string]any); ok {
+				if text, ok := obj["text"].(string); ok {
+					return parseToolResultText(text, maxLen)
+				}
+			}
+		}
+	}
+
+	// Handle string content
+	if str, ok := content.(string); ok {
+		return parseToolResultText(str, maxLen)
+	}
+
+	return ""
+}
+
+// parseToolResultText extracts useful info from tool result text (often JSON)
+func parseToolResultText(text string, maxLen int) string {
+	// Try to parse as JSON and extract useful fields
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text), &data); err == nil {
+		// Look for common useful fields
+		if msg, ok := data["message"].(string); ok {
+			return truncate(msg, maxLen)
+		}
+		if status, ok := data["status"].(string); ok {
+			return truncate(status, maxLen)
+		}
+		if summary, ok := data["summary"].(string); ok {
+			return truncate(summary, maxLen)
+		}
+		// For test results, show pass/fail counts
+		if passed, ok := data["passed"].(float64); ok {
+			if failed, ok := data["failed"].(float64); ok {
+				return fmt.Sprintf("passed: %.0f, failed: %.0f", passed, failed)
+			}
+		}
+		if total, ok := data["total"].(float64); ok {
+			return fmt.Sprintf("total: %.0f", total)
+		}
+	}
+
+	// Not JSON or no useful fields found, return truncated text
+	// Skip if it looks like raw JSON object
+	if strings.HasPrefix(strings.TrimSpace(text), "{") {
+		return ""
+	}
+	return truncate(strings.TrimSpace(text), maxLen)
+}
 
 // formatClaudeOutput parses JSON stream lines and formats them for display
 func formatClaudeOutput(lines []string, maxWidth int) []string {
@@ -720,7 +779,17 @@ func formatClaudeOutput(lines []string, maxWidth int) []string {
 					// Show tool being used and remember it
 					lastToolUsed = content.Name
 					lastToolDetail = ""
-					toolLine := fmt.Sprintf("🔧 %s", content.Name)
+					toolName := content.Name
+
+					// Format MCP tool names nicely: mcp__server__tool -> server: tool
+					if strings.HasPrefix(toolName, "mcp__") {
+						parts := strings.SplitN(toolName[5:], "__", 2)
+						if len(parts) == 2 {
+							toolName = fmt.Sprintf("%s: %s", parts[0], parts[1])
+						}
+					}
+
+					toolLine := fmt.Sprintf("🔧 %s", toolName)
 
 					// Extract file path from tool input for file operations
 					if input, ok := content.ToolInput.(map[string]any); ok {
@@ -729,17 +798,20 @@ func formatClaudeOutput(lines []string, maxWidth int) []string {
 							parts := strings.Split(filePath, "/")
 							fileName := parts[len(parts)-1]
 							lastToolDetail = fileName
-							toolLine = fmt.Sprintf("🔧 %s: %s", content.Name, fileName)
+							toolLine = fmt.Sprintf("🔧 %s: %s", toolName, fileName)
 						} else if pattern, ok := input["pattern"].(string); ok {
 							// For Glob/Grep show the pattern
 							lastToolDetail = truncate(pattern, 20)
-							toolLine = fmt.Sprintf("🔧 %s: %s", content.Name, truncate(pattern, 30))
+							toolLine = fmt.Sprintf("🔧 %s: %s", toolName, truncate(pattern, 30))
 						} else if cmd, ok := input["command"].(string); ok {
 							// For Bash show truncated command
 							lastToolDetail = truncate(cmd, 20)
-							toolLine = fmt.Sprintf("🔧 %s: %s", content.Name, truncate(cmd, 30))
+							toolLine = fmt.Sprintf("🔧 %s: %s", toolName, truncate(cmd, 30))
 						}
 					}
+
+					// Store formatted name for result display
+					lastToolUsed = toolName
 					result = append(result, toolLine)
 				}
 			}
@@ -748,12 +820,25 @@ func formatClaudeOutput(lines []string, maxWidth int) []string {
 			// Tool results - show which tool completed
 			for _, content := range msg.Message.Content {
 				if content.Type == "tool_result" {
+					resultLine := ""
 					if lastToolUsed != "" {
 						if lastToolDetail != "" {
-							result = append(result, fmt.Sprintf("   ✓ %s: %s", lastToolUsed, lastToolDetail))
+							resultLine = fmt.Sprintf("   ✓ %s: %s", lastToolUsed, lastToolDetail)
 						} else {
-							result = append(result, fmt.Sprintf("   ✓ %s done", lastToolUsed))
+							resultLine = fmt.Sprintf("   ✓ %s", lastToolUsed)
 						}
+					}
+
+					// Try to extract useful info from MCP tool results
+					if resultLine != "" && content.Content != nil {
+						extraInfo := extractToolResultInfo(content.Content, maxWidth-len(resultLine)-3)
+						if extraInfo != "" {
+							resultLine += " → " + extraInfo
+						}
+					}
+
+					if resultLine != "" {
+						result = append(result, resultLine)
 					}
 				}
 			}
