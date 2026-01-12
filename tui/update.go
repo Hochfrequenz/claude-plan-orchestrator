@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -488,10 +489,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.queued = remaining
 
 		if len(msg.Errors) > 0 {
-			m.statusMsg = fmt.Sprintf("Batch started: %d task(s), %d error(s)", msg.Count, len(msg.Errors))
-			// Show the first error in status
-			if len(msg.Errors) == 1 {
-				m.statusMsg = fmt.Sprintf("Error: %s", msg.Errors[0])
+			// Show all errors (truncated if too long)
+			errorDetails := strings.Join(msg.Errors, "; ")
+			if len(errorDetails) > 200 {
+				errorDetails = errorDetails[:200] + "..."
+			}
+			if msg.Count > 0 {
+				m.statusMsg = fmt.Sprintf("Batch: %d started, %d failed: %s", msg.Count, len(msg.Errors), errorDetails)
+			} else {
+				m.statusMsg = fmt.Sprintf("Batch failed: %s", errorDetails)
 			}
 		} else {
 			m.statusMsg = fmt.Sprintf("Batch started: %d task(s)", msg.Count)
