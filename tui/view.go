@@ -671,6 +671,7 @@ type claudeStreamMessage struct {
 
 // Track last tool used for better result display
 var lastToolUsed string
+var lastToolDetail string
 
 // formatClaudeOutput parses JSON stream lines and formats them for display
 func formatClaudeOutput(lines []string, maxWidth int) []string {
@@ -718,7 +719,27 @@ func formatClaudeOutput(lines []string, maxWidth int) []string {
 				case "tool_use":
 					// Show tool being used and remember it
 					lastToolUsed = content.Name
+					lastToolDetail = ""
 					toolLine := fmt.Sprintf("🔧 %s", content.Name)
+
+					// Extract file path from tool input for file operations
+					if input, ok := content.ToolInput.(map[string]any); ok {
+						if filePath, ok := input["file_path"].(string); ok {
+							// Show just the filename for brevity
+							parts := strings.Split(filePath, "/")
+							fileName := parts[len(parts)-1]
+							lastToolDetail = fileName
+							toolLine = fmt.Sprintf("🔧 %s: %s", content.Name, fileName)
+						} else if pattern, ok := input["pattern"].(string); ok {
+							// For Glob/Grep show the pattern
+							lastToolDetail = truncate(pattern, 20)
+							toolLine = fmt.Sprintf("🔧 %s: %s", content.Name, truncate(pattern, 30))
+						} else if cmd, ok := input["command"].(string); ok {
+							// For Bash show truncated command
+							lastToolDetail = truncate(cmd, 20)
+							toolLine = fmt.Sprintf("🔧 %s: %s", content.Name, truncate(cmd, 30))
+						}
+					}
 					result = append(result, toolLine)
 				}
 			}
@@ -728,7 +749,11 @@ func formatClaudeOutput(lines []string, maxWidth int) []string {
 			for _, content := range msg.Message.Content {
 				if content.Type == "tool_result" {
 					if lastToolUsed != "" {
-						result = append(result, fmt.Sprintf("   ✓ %s done", lastToolUsed))
+						if lastToolDetail != "" {
+							result = append(result, fmt.Sprintf("   ✓ %s: %s", lastToolUsed, lastToolDetail))
+						} else {
+							result = append(result, fmt.Sprintf("   ✓ %s done", lastToolUsed))
+						}
 					}
 				}
 			}
