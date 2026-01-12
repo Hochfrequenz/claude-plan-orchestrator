@@ -17,7 +17,7 @@ An autonomous development orchestrator that manages Claude Code agents working o
 
 ```bash
 # Install (no compilation required)
-curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install.sh | bash
 
 # Set up a new project
 claude-orch onboard
@@ -31,13 +31,13 @@ Download a pre-built binary with a single command:
 
 ```bash
 # Install latest version
-curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install.sh | bash
 
 # Install specific version
-curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/install.sh | bash -s -- v1.0.0
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install.sh | bash -s -- v1.0.0
 
 # Custom install directory
-INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/install.sh | bash
+INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install.sh | bash
 ```
 
 ### Option 2: Homebrew (macOS/Linux)
@@ -53,8 +53,8 @@ Prerequisites: Go 1.21+
 
 ```bash
 # Clone the repository
-git clone https://github.com/hochfrequenz/claude-orchestrator.git
-cd claude-orchestrator
+git clone https://github.com/hochfrequenz/claude-plan-orchestrator.git
+cd claude-plan-orchestrator
 
 # Build the CLI
 go build -o claude-orch ./cmd/claude-orch
@@ -91,7 +91,7 @@ claude-orch onboard
 
 This will:
 1. Check prerequisites (git, claude CLI)
-2. Create configuration file (~/.config/claude-orchestrator/config.toml)
+2. Create configuration file (~/.config/claude-plan-orchestrator/config.toml)
 3. Set up plans directory structure (docs/plans/)
 4. Create a sample plan file
 5. Run initial task sync
@@ -99,12 +99,12 @@ This will:
 Alternatively, run the standalone onboarding script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/onboard.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/onboard.sh | bash
 ```
 
 ## Configuration
 
-Create a configuration file at `~/.config/claude-orchestrator/config.toml`:
+Create a configuration file at `~/.config/claude-plan-orchestrator/config.toml`:
 
 ```toml
 [general]
@@ -112,13 +112,13 @@ Create a configuration file at `~/.config/claude-orchestrator/config.toml`:
 project_root = "~/code/energy-erp"
 
 # Directory for agent worktrees
-worktree_dir = "~/.claude-orchestrator/worktrees"
+worktree_dir = "~/.claude-plan-orchestrator/worktrees"
 
 # Maximum concurrent agents
 max_parallel_agents = 3
 
 # SQLite database path
-database_path = "~/.claude-orchestrator/orchestrator.db"
+database_path = "~/.claude-plan-orchestrator/orchestrator.db"
 
 [claude]
 model = "claude-sonnet-4-20250514"
@@ -135,7 +135,7 @@ port = 8080
 
 ### Scheduled Batches (Optional)
 
-Create `~/.config/claude-orchestrator/schedule.toml` for automated batch runs:
+Create `~/.config/claude-plan-orchestrator/schedule.toml` for automated batch runs:
 
 ```toml
 [[batch]]
