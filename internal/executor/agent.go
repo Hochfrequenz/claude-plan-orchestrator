@@ -115,16 +115,20 @@ func (a *Agent) Start(ctx context.Context) error {
 		return fmt.Errorf("agent not in queued state: %s", a.Status)
 	}
 
+	if a.Prompt == "" {
+		return fmt.Errorf("agent has no prompt")
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
 
-	// Build claude command
+	// Build claude command with prompt as argument
 	a.cmd = exec.CommandContext(ctx, "claude",
-		"--print", // Non-interactive mode
-		"--dangerously-skip-permissions",
+		"--print",                       // Non-interactive mode
+		"--dangerously-skip-permissions", // Skip permission prompts
+		"-p", a.Prompt,                  // Pass prompt as argument
 	)
 	a.cmd.Dir = a.WorktreePath
-	a.cmd.Stdin = nil // Will write prompt via stdin pipe
 
 	// Capture output
 	stdout, err := a.cmd.StdoutPipe()
