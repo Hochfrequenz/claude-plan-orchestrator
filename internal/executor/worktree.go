@@ -75,41 +75,36 @@ func (m *WorktreeManager) Create(taskID domain.TaskID) (string, error) {
 
 // cleanupExistingBranch removes any existing worktree and branch for the given branch name
 func (m *WorktreeManager) cleanupExistingBranch(branch string) error {
-	// First, check if there's a worktree using this branch
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	// Prune any stale worktree entries first
+	cmd := exec.Command("git", "worktree", "prune")
 	cmd.Dir = m.repoDir
-	out, err := cmd.Output()
-	if err != nil {
-		return nil // Can't list worktrees, assume none exist
-	}
+	cmd.Run()
+
+	// Check if there's a worktree using this branch
+	cmd = exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = m.repoDir
+	out, _ := cmd.Output()
 
 	// Parse worktree list to find one with our branch
-	var worktreePath string
 	lines := strings.Split(string(out), "\n")
 	for i, line := range lines {
 		if strings.HasPrefix(line, "worktree ") {
 			wtPath := strings.TrimPrefix(line, "worktree ")
-			// Check if next line has our branch
-			if i+2 < len(lines) && strings.TrimSpace(lines[i+2]) == "branch refs/heads/"+branch {
-				worktreePath = wtPath
-				break
+			// Check if this worktree has our branch (branch line is 2 lines after worktree)
+			for j := i + 1; j < len(lines) && j < i+4; j++ {
+				if strings.TrimSpace(lines[j]) == "branch refs/heads/"+branch {
+					// Found worktree with our branch - remove it
+					rmCmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
+					rmCmd.Dir = m.repoDir
+					rmCmd.Run() // Ignore error
+					break
+				}
 			}
 		}
 	}
 
-	// Remove the worktree if found
-	if worktreePath != "" {
-		cmd = exec.Command("git", "worktree", "remove", "--force", worktreePath)
-		cmd.Dir = m.repoDir
-		cmd.Run() // Ignore error, might already be removed
-	}
-
-	// Prune any stale worktree entries
-	cmd = exec.Command("git", "worktree", "prune")
-	cmd.Dir = m.repoDir
-	cmd.Run()
-
-	// Try to delete the branch (might fail if not merged, that's ok)
+	// Always try to delete the branch (even if no worktree found)
+	// This handles orphan branches from previous runs
 	cmd = exec.Command("git", "branch", "-D", branch)
 	cmd.Dir = m.repoDir
 	cmd.Run() // Ignore error - branch might not exist
