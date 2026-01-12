@@ -43,8 +43,21 @@ func (m *WorktreeManager) Create(taskID domain.TaskID) (string, error) {
 	// Branch name
 	branch := BranchName(taskID)
 
-	// Create worktree with new branch from main
-	cmd := exec.Command("git", "worktree", "add", "-b", branch, wtPath, "HEAD")
+	// Fetch latest from origin first (if remote exists)
+	fetchCmd := exec.Command("git", "fetch", "origin", "main")
+	fetchCmd.Dir = m.repoDir
+	fetchCmd.Run() // Ignore error - remote might not exist in tests
+
+	// Try to create worktree from origin/main first, fall back to HEAD
+	baseBranch := "origin/main"
+	checkCmd := exec.Command("git", "rev-parse", "--verify", "origin/main")
+	checkCmd.Dir = m.repoDir
+	if checkCmd.Run() != nil {
+		baseBranch = "HEAD" // Fall back if origin/main doesn't exist
+	}
+
+	// Create worktree with new branch
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, wtPath, baseBranch)
 	cmd.Dir = m.repoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add: %s: %w", out, err)
