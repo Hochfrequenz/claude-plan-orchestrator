@@ -69,3 +69,8 @@ func (m *Model) SetAgents(agents []*AgentView) {
 func (m *Model) SetTasks(tasks []*domain.Task) {
 	m.allTasks = tasks
 }
+
+// SetQueued updates the queued tasks list
+func (m *Model) SetQueued(tasks []*domain.Task) {
+	m.queued = tasks
+}

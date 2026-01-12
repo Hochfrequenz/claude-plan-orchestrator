@@ -261,7 +261,27 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	model := tui.NewModel(cfg.General.MaxParallelAgents)
+	// Open database
+	store, err := taskstore.New(cfg.General.DatabasePath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// Load all tasks
+	allTasks, err := store.ListTasks(taskstore.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to load tasks: %w", err)
+	}
+
+	// Load queued tasks (not started)
+	queued, _ := store.ListTasks(taskstore.ListOptions{Status: domain.StatusNotStarted})
+
+	model := tui.NewModel(tui.ModelConfig{
+		MaxActive: cfg.General.MaxParallelAgents,
+		AllTasks:  allTasks,
+		Queued:    queued,
+	})
+
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

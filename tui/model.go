@@ -57,11 +57,32 @@ type FlaggedPR struct {
 	Reason   string
 }
 
+// ModelConfig holds initial data for the TUI model
+type ModelConfig struct {
+	MaxActive int
+	AllTasks  []*domain.Task
+	Queued    []*domain.Task
+	Agents    []*AgentView
+	Flagged   []*FlaggedPR
+}
+
 // NewModel creates a new TUI model
-func NewModel(maxActive int) Model {
+func NewModel(cfg ModelConfig) Model {
+	activeCount := 0
+	for _, a := range cfg.Agents {
+		if a.Status == "running" {
+			activeCount++
+		}
+	}
+
 	return Model{
-		maxActive: maxActive,
-		activeTab: 0,
+		maxActive:   cfg.MaxActive,
+		allTasks:    cfg.AllTasks,
+		queued:      cfg.Queued,
+		agents:      cfg.Agents,
+		flagged:     cfg.Flagged,
+		activeCount: activeCount,
+		activeTab:   0,
 	}
 }
 
