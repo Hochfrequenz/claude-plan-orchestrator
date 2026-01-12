@@ -13,8 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
+
+// orchestratorNamespace is a fixed UUID namespace for generating deterministic session IDs
+// This ensures the same task always gets the same session ID for resume capability
+var orchestratorNamespace = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 // AgentStatus represents the status of an agent
 type AgentStatus string
@@ -238,9 +243,9 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 
 	// Generate session ID for Claude Code resume capability
-	// Use a stable name based on task ID so we can resume later
+	// Use UUID v5 (deterministic) so same task always gets same session ID
 	if a.SessionID == "" {
-		a.SessionID = fmt.Sprintf("orch-%s", a.TaskID.String())
+		a.SessionID = uuid.NewSHA1(orchestratorNamespace, []byte(a.TaskID.String())).String()
 	}
 
 	// Create log file in worktree
@@ -372,8 +377,8 @@ func (a *Agent) Resume(ctx context.Context) error {
 
 	// Must have a session ID to resume
 	if a.SessionID == "" {
-		// Generate one based on task ID for backwards compatibility
-		a.SessionID = fmt.Sprintf("orch-%s", a.TaskID.String())
+		// Generate deterministic UUID based on task ID
+		a.SessionID = uuid.NewSHA1(orchestratorNamespace, []byte(a.TaskID.String())).String()
 	}
 
 	// Re-open or create log file (append mode)
