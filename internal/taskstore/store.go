@@ -53,6 +53,7 @@ func (s *Store) UpsertTask(task *domain.Task) error {
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			description = excluded.description,
+			status = excluded.status,
 			priority = excluded.priority,
 			depends_on = excluded.depends_on,
 			needs_review = excluded.needs_review,
