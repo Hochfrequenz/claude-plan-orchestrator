@@ -609,11 +609,13 @@ func (m Model) renderSelectedAgentDetail() string {
 		}
 		formattedLines := formatClaudeOutput(agent.Output, maxWidth)
 
-		// Show last N formatted lines
-		maxLines := 15
+		// Show last N formatted lines (more lines for better visibility)
+		maxLines := 25
 		start := 0
 		if len(formattedLines) > maxLines {
 			start = len(formattedLines) - maxLines
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  ... (%d earlier lines hidden)", start)))
+			b.WriteString("\n")
 		}
 		for _, line := range formattedLines[start:] {
 			b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s", line)))
@@ -662,9 +664,13 @@ type claudeStreamMessage struct {
 			Name      string `json:"name,omitempty"`       // tool name
 			ToolInput any    `json:"input,omitempty"`      // tool input
 			ToolUseID string `json:"tool_use_id,omitempty"`
+			Content   string `json:"content,omitempty"`    // tool result content
 		} `json:"content,omitempty"`
 	} `json:"message,omitempty"`
 }
+
+// Track last tool used for better result display
+var lastToolUsed string
 
 // formatClaudeOutput parses JSON stream lines and formats them for display
 func formatClaudeOutput(lines []string, maxWidth int) []string {
@@ -710,17 +716,20 @@ func formatClaudeOutput(lines []string, maxWidth int) []string {
 						result = append(result, tl)
 					}
 				case "tool_use":
-					// Show tool being used
+					// Show tool being used and remember it
+					lastToolUsed = content.Name
 					toolLine := fmt.Sprintf("🔧 %s", content.Name)
 					result = append(result, toolLine)
 				}
 			}
 
 		case "user":
-			// Tool results - show a brief indicator
+			// Tool results - show which tool completed
 			for _, content := range msg.Message.Content {
 				if content.Type == "tool_result" {
-					result = append(result, "   ↳ (tool result)")
+					if lastToolUsed != "" {
+						result = append(result, fmt.Sprintf("   ✓ %s done", lastToolUsed))
+					}
 				}
 			}
 		}

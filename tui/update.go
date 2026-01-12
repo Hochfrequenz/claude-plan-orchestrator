@@ -361,9 +361,9 @@ func (m *Model) updateAgentsFromManager() {
 			av.Error = agent.Error.Error()
 		}
 
-		// Capture last N lines of output
+		// Capture last N lines of output (keep more for better context)
 		output := agent.GetOutput()
-		maxLines := 20
+		maxLines := 100
 		if len(output) > maxLines {
 			av.Output = output[len(output)-maxLines:]
 		} else {
