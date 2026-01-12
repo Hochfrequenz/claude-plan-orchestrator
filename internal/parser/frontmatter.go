@@ -3,7 +3,7 @@ package parser
 import (
 	"bytes"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"gopkg.in/yaml.v3"
 )
 

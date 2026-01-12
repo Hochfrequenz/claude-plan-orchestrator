@@ -1,19 +1,19 @@
-# GoReleaser configuration for ERP Orchestrator
+# GoReleaser configuration for Claude Plan Orchestrator
 # Run: goreleaser release --clean
 # Or for testing: goreleaser build --snapshot --clean
 
 version: 2
 
-project_name: erp-orch
+project_name: claude-orch
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: erp-orch
-    main: ./cmd/erp-orch
-    binary: erp-orch
+  - id: claude-orch
+    main: ./cmd/claude-orch
+    binary: claude-orch
     env:
       - CGO_ENABLED=0
     goos:
@@ -64,21 +64,21 @@ changelog:
 release:
   github:
     owner: hochfrequenz
-    name: erp-orchestrator
+    name: claude-plan-orchestrator
   draft: false
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
 
 brews:
-  - name: erp-orch
+  - name: claude-orch
     repository:
       owner: hochfrequenz
       name: homebrew-tap
     folder: Formula
-    homepage: "https://github.com/hochfrequenz/erp-orchestrator"
+    homepage: "https://github.com/hochfrequenz/claude-plan-orchestrator"
     description: "Autonomous development orchestrator for Claude Code agents"
     license: "MIT"
     install: |
-      bin.install "erp-orch"
+      bin.install "claude-orch"
     test: |
-      system "#{bin}/erp-orch", "--version"
+      system "#{bin}/claude-orch", "--version"

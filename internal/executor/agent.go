@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
 
 // AgentStatus represents the status of an agent

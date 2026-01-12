@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
-	"github.com/anthropics/erp-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 )
 
 func TestObserver_DetectStuck(t *testing.T) {

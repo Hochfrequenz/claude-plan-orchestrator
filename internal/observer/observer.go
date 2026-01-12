@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/erp-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 )
 
 // Observer monitors agent execution and collects metrics

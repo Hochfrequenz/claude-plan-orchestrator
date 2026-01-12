@@ -3,7 +3,7 @@ package scheduler
 import (
 	"testing"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
 
 func TestScheduler_GetReadyTasks(t *testing.T) {

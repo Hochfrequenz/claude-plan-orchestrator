@@ -10,9 +10,9 @@ import (
 var (
 	configPath string
 	rootCmd    = &cobra.Command{
-		Use:   "erp-orch",
-		Short: "ERP Orchestrator - Autonomous development manager",
-		Long: `ERP Orchestrator manages Claude Code agents working on EnergyERP tasks.
+		Use:   "claude-orch",
+		Short: "Claude Plan Orchestrator - Autonomous development manager",
+		Long: `Claude Plan Orchestrator manages Claude Code agents working on development tasks.
 It parses markdown plans, dispatches work to agents in git worktrees,
 and handles the full PR lifecycle through to merge.`,
 	}

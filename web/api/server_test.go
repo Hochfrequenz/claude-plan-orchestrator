@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
 
 func TestListTasksHandler(t *testing.T) {

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
-# ERP Orchestrator Installer
+# Claude Plan Orchestrator Installer
 # Downloads and installs the latest pre-built binary
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/anthropics/erp-orchestrator/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install.sh | bash
 #
 # Or with a specific version:
-#   curl -fsSL https://raw.githubusercontent.com/anthropics/erp-orchestrator/main/scripts/install.sh | bash -s -- v1.0.0
+#   curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install.sh | bash -s -- v1.0.0
 #
 
 set -euo pipefail
 
-REPO="hochfrequenz/erp-orchestrator"
-BINARY_NAME="erp-orch"
+REPO="hochfrequenz/claude-plan-orchestrator"
+BINARY_NAME="claude-orch"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 # Colors
@@ -123,20 +123,20 @@ install() {
         echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
         echo ""
     else
-        success "Run 'erp-orch --help' to get started"
+        success "Run 'claude-orch --help' to get started"
     fi
 
     echo ""
     info "Next steps:"
-    echo "  1. Run 'erp-orch onboard' to set up a new project"
-    echo "  2. Or run 'erp-orch --help' to see all commands"
+    echo "  1. Run 'claude-orch onboard' to set up a new project"
+    echo "  2. Or run 'claude-orch --help' to see all commands"
 }
 
 # Main
 main() {
     echo ""
-    echo "  ERP Orchestrator Installer"
-    echo "  =========================="
+    echo "  Claude Plan Orchestrator Installer"
+    echo "  ==================================="
     echo ""
 
     install "$@"

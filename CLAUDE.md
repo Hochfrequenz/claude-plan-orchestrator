@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ERP Orchestrator is an autonomous development orchestrator that manages Claude Code agents working on EnergyERP. It parses markdown plans from `docs/plans/`, dispatches work to agents in isolated git worktrees, and handles the full PR lifecycle through to merge.
+Claude Plan Orchestrator is an autonomous development orchestrator that manages Claude Code agents working on your project. It parses markdown plans from `docs/plans/`, dispatches work to agents in isolated git worktrees, and handles the full PR lifecycle through to merge.
 
 ## Tech Stack
 
@@ -31,7 +31,7 @@ ERP Orchestrator is an autonomous development orchestrator that manages Claude C
 
 ```bash
 # Build the CLI
-go build -o erp-orch ./cmd/erp-orch
+go build -o claude-orch ./cmd/claude-orch
 
 # Run tests
 go test ./...
@@ -100,24 +100,24 @@ SQLite with tables: `tasks`, `runs`, `logs`, `prs`, `batches`. Runs track worktr
 
 ## Configuration
 
-Main config at `~/.config/erp-orchestrator/config.toml`:
-- `project_root`: Path to EnergyERP repo
+Main config at `~/.config/claude-orchestrator/config.toml`:
+- `project_root`: Path to your project repo
 - `worktree_dir`: Where agent worktrees are created
 - `max_parallel_agents`: Concurrency limit (default: 3)
 
-Schedule config at `~/.config/erp-orchestrator/schedule.toml` for batch runs.
+Schedule config at `~/.config/claude-orchestrator/schedule.toml` for batch runs.
 
 ## CLI Commands
 
 ```bash
-erp-orch start [--count N] [--module M] [TASK...]  # Start tasks
-erp-orch stop [TASK...]                            # Stop tasks gracefully
-erp-orch status                                     # Show status summary
-erp-orch list [--status S] [--module M]            # List tasks
-erp-orch logs TASK                                  # View task logs
-erp-orch sync                                       # Re-parse markdown, sync state
-erp-orch tui                                        # Launch TUI dashboard
-erp-orch serve                                      # Start web UI server
-erp-orch pr review                                  # List PRs needing review
-erp-orch pr merge TASK                             # Manually merge flagged PR
+claude-orch start [--count N] [--module M] [TASK...]  # Start tasks
+claude-orch stop [TASK...]                            # Stop tasks gracefully
+claude-orch status                                     # Show status summary
+claude-orch list [--status S] [--module M]            # List tasks
+claude-orch logs TASK                                  # View task logs
+claude-orch sync                                       # Re-parse markdown, sync state
+claude-orch tui                                        # Launch TUI dashboard
+claude-orch serve                                      # Start web UI server
+claude-orch pr review                                  # List PRs needing review
+claude-orch pr merge TASK                             # Manually merge flagged PR
 ```

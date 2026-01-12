@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
 
 // Syncer handles status synchronization back to markdown files

@@ -1,6 +1,6 @@
-# ERP Orchestrator
+# Claude Plan Orchestrator
 
-An autonomous development orchestrator that manages Claude Code agents working on EnergyERP. It parses markdown plans, dispatches work to agents in isolated git worktrees, and handles the full PR lifecycle through to merge.
+An autonomous development orchestrator that manages Claude Code agents working on your project. It parses markdown plans, dispatches work to agents in isolated git worktrees, and handles the full PR lifecycle through to merge.
 
 ## Features
 
@@ -17,10 +17,10 @@ An autonomous development orchestrator that manages Claude Code agents working o
 
 ```bash
 # Install (no compilation required)
-curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/install.sh | bash
 
 # Set up a new project
-erp-orch onboard
+claude-orch onboard
 ```
 
 ## Installation
@@ -31,20 +31,20 @@ Download a pre-built binary with a single command:
 
 ```bash
 # Install latest version
-curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/install.sh | bash
 
 # Install specific version
-curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/install.sh | bash -s -- v1.0.0
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/install.sh | bash -s -- v1.0.0
 
 # Custom install directory
-INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/install.sh | bash
+INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/install.sh | bash
 ```
 
 ### Option 2: Homebrew (macOS/Linux)
 
 ```bash
 brew tap hochfrequenz/tap
-brew install erp-orch
+brew install claude-orch
 ```
 
 ### Option 3: Build from Source
@@ -53,14 +53,14 @@ Prerequisites: Go 1.21+
 
 ```bash
 # Clone the repository
-git clone https://github.com/hochfrequenz/erp-orchestrator.git
-cd erp-orchestrator
+git clone https://github.com/hochfrequenz/claude-orchestrator.git
+cd claude-orchestrator
 
 # Build the CLI
-go build -o erp-orch ./cmd/erp-orch
+go build -o claude-orch ./cmd/claude-orch
 
 # Install to PATH
-mv erp-orch ~/.local/bin/
+mv claude-orch ~/.local/bin/
 ```
 
 ### Prerequisites
@@ -83,15 +83,15 @@ mv erp-orch ~/.local/bin/
 
 ## Project Onboarding
 
-Set up erp-orch for a new project with the interactive wizard:
+Set up claude-orch for a new project with the interactive wizard:
 
 ```bash
-erp-orch onboard
+claude-orch onboard
 ```
 
 This will:
 1. Check prerequisites (git, claude CLI)
-2. Create configuration file (~/.config/erp-orchestrator/config.toml)
+2. Create configuration file (~/.config/claude-orchestrator/config.toml)
 3. Set up plans directory structure (docs/plans/)
 4. Create a sample plan file
 5. Run initial task sync
@@ -99,26 +99,26 @@ This will:
 Alternatively, run the standalone onboarding script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hochfrequenz/erp-orchestrator/main/scripts/onboard.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-orchestrator/main/scripts/onboard.sh | bash
 ```
 
 ## Configuration
 
-Create a configuration file at `~/.config/erp-orchestrator/config.toml`:
+Create a configuration file at `~/.config/claude-orchestrator/config.toml`:
 
 ```toml
 [general]
-# Path to the EnergyERP repository
+# Path to the your project repository
 project_root = "~/code/energy-erp"
 
 # Directory for agent worktrees
-worktree_dir = "~/.erp-orchestrator/worktrees"
+worktree_dir = "~/.claude-orchestrator/worktrees"
 
 # Maximum concurrent agents
 max_parallel_agents = 3
 
 # SQLite database path
-database_path = "~/.erp-orchestrator/orchestrator.db"
+database_path = "~/.claude-orchestrator/orchestrator.db"
 
 [claude]
 model = "claude-sonnet-4-20250514"
@@ -135,7 +135,7 @@ port = 8080
 
 ### Scheduled Batches (Optional)
 
-Create `~/.config/erp-orchestrator/schedule.toml` for automated batch runs:
+Create `~/.config/claude-orchestrator/schedule.toml` for automated batch runs:
 
 ```toml
 [[batch]]
@@ -159,7 +159,7 @@ max_duration = "4h"
 Parse tasks from markdown files in `docs/plans/`:
 
 ```bash
-erp-orch sync
+claude-orch sync
 ```
 
 Tasks are identified as `{module}/E{number}` (e.g., `technical/E05`).
@@ -168,38 +168,38 @@ Tasks are identified as `{module}/E{number}` (e.g., `technical/E05`).
 
 ```bash
 # Summary view
-erp-orch status
+claude-orch status
 
 # List all tasks
-erp-orch list
+claude-orch list
 
 # Filter by module
-erp-orch list --module technical
+claude-orch list --module technical
 
 # Filter by status
-erp-orch list --status in_progress
+claude-orch list --status in_progress
 ```
 
 ### Starting Tasks
 
 ```bash
 # Start next 3 ready tasks (default)
-erp-orch start
+claude-orch start
 
 # Start specific number of tasks
-erp-orch start --count 5
+claude-orch start --count 5
 
 # Start specific tasks
-erp-orch start technical/E05 billing/E02
+claude-orch start technical/E05 billing/E02
 
 # Start tasks from specific module
-erp-orch start --module technical
+claude-orch start --module technical
 ```
 
 ### Viewing Logs
 
 ```bash
-erp-orch logs technical/E05
+claude-orch logs technical/E05
 ```
 
 ### TUI Dashboard
@@ -207,7 +207,7 @@ erp-orch logs technical/E05
 Launch the terminal UI for real-time monitoring:
 
 ```bash
-erp-orch tui
+claude-orch tui
 ```
 
 ### Web UI
@@ -216,10 +216,10 @@ Start the web server:
 
 ```bash
 # Default port 8080
-erp-orch serve
+claude-orch serve
 
 # Custom port
-erp-orch serve --port 3000
+claude-orch serve --port 3000
 ```
 
 Then open http://localhost:8080 in your browser.
@@ -228,10 +228,10 @@ Then open http://localhost:8080 in your browser.
 
 ```bash
 # List PRs needing review
-erp-orch pr review
+claude-orch pr review
 
 # Manually merge a flagged PR
-erp-orch pr merge technical/E05
+claude-orch pr merge technical/E05
 ```
 
 ## Task Format

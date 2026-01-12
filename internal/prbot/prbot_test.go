@@ -3,7 +3,7 @@ package prbot
 import (
 	"testing"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
 
 func TestBuildPRBody(t *testing.T) {

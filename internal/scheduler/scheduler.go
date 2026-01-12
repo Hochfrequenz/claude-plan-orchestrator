@@ -3,7 +3,7 @@ package scheduler
 import (
 	"sort"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
 
 // Scheduler determines which tasks are ready to run

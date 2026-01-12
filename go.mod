@@ -1,4 +1,4 @@
-module github.com/anthropics/erp-orchestrator
+module github.com/hochfrequenz/claude-plan-orchestrator
 
 go 1.24.0
 

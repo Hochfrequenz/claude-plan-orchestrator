@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/anthropics/erp-orchestrator/internal/domain"
-	"github.com/anthropics/erp-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 )
 
 // Store interface for database operations
