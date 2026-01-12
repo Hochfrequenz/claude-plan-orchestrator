@@ -161,7 +161,17 @@ func NewModel(cfg ModelConfig) Model {
 	// Set status message if we recovered agents
 	statusMsg := ""
 	if len(cfg.RecoveredAgents) > 0 {
-		statusMsg = fmt.Sprintf("Recovered %d agent(s) from previous session", len(cfg.RecoveredAgents))
+		stillRunning := 0
+		for _, a := range cfg.RecoveredAgents {
+			if a.Status == executor.AgentRunning {
+				stillRunning++
+			}
+		}
+		if stillRunning > 0 {
+			statusMsg = fmt.Sprintf("Recovered %d agent(s): %d running", len(cfg.RecoveredAgents), stillRunning)
+		} else {
+			statusMsg = fmt.Sprintf("Recovered %d completed agent(s)", len(cfg.RecoveredAgents))
+		}
 	}
 
 	return Model{

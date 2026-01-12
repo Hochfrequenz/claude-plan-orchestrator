@@ -301,6 +301,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 
 	// Convert recovered agents to AgentViews for TUI
 	var recoveredViews []*tui.AgentView
+	var stillRunning, completed int
 	for _, agent := range recoveredAgents {
 		recoveredViews = append(recoveredViews, &tui.AgentView{
 			TaskID:       agent.TaskID.String(),
@@ -310,6 +311,22 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			WorktreePath: agent.WorktreePath,
 			Output:       agent.GetOutput(),
 		})
+		if agent.Status == executor.AgentRunning {
+			stillRunning++
+		} else {
+			completed++
+		}
+	}
+
+	// Print recovery summary to console
+	if len(recoveredAgents) > 0 {
+		if stillRunning > 0 && completed > 0 {
+			fmt.Printf("Recovered %d agent(s): %d still running, %d completed\n", len(recoveredAgents), stillRunning, completed)
+		} else if stillRunning > 0 {
+			fmt.Printf("Recovered %d running agent(s)\n", stillRunning)
+		} else {
+			fmt.Printf("Recovered %d completed agent(s) from previous session\n", completed)
+		}
 	}
 
 	// Create plan change channel for receiving file watcher notifications
