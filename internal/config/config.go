@@ -100,7 +100,7 @@ func Default() *Config {
 			Timeouts: BuildPoolTimeoutConfig{
 				JobDefaultSecs:        300,
 				HeartbeatIntervalSecs: 30,
-				HeartbeatTimeoutSecs:  10,
+				HeartbeatTimeoutSecs:  90, // Allow missing 2 heartbeats before disconnect
 			},
 		},
 	}

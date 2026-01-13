@@ -44,7 +44,7 @@ func NewCoordinator(config CoordinatorConfig, registry *Registry, dispatcher *Di
 		config.HeartbeatInterval = 30 * time.Second
 	}
 	if config.HeartbeatTimeout == 0 {
-		config.HeartbeatTimeout = 10 * time.Second
+		config.HeartbeatTimeout = 90 * time.Second // Allow missing 2 heartbeats before disconnect
 	}
 
 	c := &Coordinator{

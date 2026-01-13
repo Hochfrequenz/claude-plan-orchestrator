@@ -358,10 +358,10 @@ worktree_dir = "/tmp/build-pool/local"
 [build_pool.timeouts]
 job_default_secs = 300      # 5 minute default timeout
 heartbeat_interval_secs = 30
-heartbeat_timeout_secs = 10
+heartbeat_timeout_secs = 90 # Allow missing 2 heartbeats (handles high CPU load)
 ```
 
-Start the coordinator:
+Start the coordinator (or just launch the TUI - it auto-starts the coordinator):
 
 ```bash
 claude-orch build-pool start
