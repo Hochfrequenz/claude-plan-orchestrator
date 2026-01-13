@@ -934,15 +934,25 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		client := &http.Client{Timeout: 30 * time.Second}
 
-		// Get the git remote URL for the project (workers need remote URL, not local path)
-		repoURL := projectRoot
-		if cmd := exec.Command("git", "-C", projectRoot, "remote", "get-url", "origin"); cmd != nil {
-			if out, err := cmd.Output(); err == nil {
-				repoURL = strings.TrimSpace(string(out))
+		// Extract hostname from buildPoolURL (e.g., "http://host:8081" -> "host")
+		// and construct git daemon URL (default port 9418)
+		gitURL := ""
+		if strings.HasPrefix(buildPoolURL, "http://") || strings.HasPrefix(buildPoolURL, "https://") {
+			// Parse the URL to get the hostname
+			hostPart := strings.TrimPrefix(buildPoolURL, "http://")
+			hostPart = strings.TrimPrefix(hostPart, "https://")
+			// Remove port if present
+			if idx := strings.Index(hostPart, ":"); idx != -1 {
+				hostPart = hostPart[:idx]
 			}
+			// Remove path if present
+			if idx := strings.Index(hostPart, "/"); idx != -1 {
+				hostPart = hostPart[:idx]
+			}
+			gitURL = fmt.Sprintf("git://%s:9418/", hostPart)
 		}
 
-		// Get current commit hash
+		// Get current commit hash from local repo
 		commit := "HEAD"
 		if cmd := exec.Command("git", "-C", projectRoot, "rev-parse", "HEAD"); cmd != nil {
 			if out, err := cmd.Output(); err == nil {
@@ -950,7 +960,7 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 			}
 		}
 
-		// Submit a simple test command using the project repo
+		// Submit a simple test command using the coordinator's git daemon
 		jobReq := struct {
 			Command string `json:"command"`
 			Repo    string `json:"repo"`
@@ -958,7 +968,7 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 			Timeout int    `json:"timeout"`
 		}{
 			Command: "echo 'hello from worker' && git rev-parse --short HEAD",
-			Repo:    repoURL,
+			Repo:    gitURL,
 			Commit:  commit,
 			Timeout: 10,
 		}
