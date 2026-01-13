@@ -47,7 +47,7 @@ in {
     };
 
     maxJobs = mkOption {
-      type = types.int;
+      type = types.ints.positive;
       default = 4;
       description = "Maximum concurrent jobs";
     };
@@ -84,6 +84,7 @@ in {
         RestartSec = 10;
 
         # Security hardening
+        DynamicUser = true;
         NoNewPrivileges = true;
         ProtectSystem = "strict";
         ReadWritePaths = [ cfg.gitCacheDir cfg.worktreeDir ];
@@ -93,12 +94,6 @@ in {
         CacheDirectory = "build-agent";
       };
     };
-
-    # Ensure directories exist
-    systemd.tmpfiles.rules = [
-      "d ${cfg.gitCacheDir} 0755 root root -"
-      "d ${cfg.worktreeDir} 0755 root root -"
-    ];
 
     # Ensure nix with flakes is available
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
