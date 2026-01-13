@@ -508,6 +508,112 @@ func TestCoordinatorHeartbeat(t *testing.T) {
 	}
 }
 
+func TestCoordinator_CompleteWithVerbosity(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Accumulate output
+	coord.AccumulateOutput("job-verb", "stdout", "stdout content\n")
+	coord.AccumulateOutput("job-verb", "stderr", "stderr content\n")
+
+	// Test minimal (default)
+	result := coord.CompleteJob("job-verb", 0, 1500, "")
+	if result.Stdout != "" {
+		t.Errorf("minimal: stdout should be empty, got %q", result.Stdout)
+	}
+	if result.Stderr != "stderr content\n" {
+		t.Errorf("minimal: stderr = %q, want %q", result.Stderr, "stderr content\n")
+	}
+}
+
+func TestCoordinator_CompleteJobFields(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Accumulate output
+	coord.AccumulateOutput("job-fields", "stdout", "stdout content\n")
+	coord.AccumulateOutput("job-fields", "stderr", "stderr content\n")
+
+	// Test result fields are set correctly
+	result := coord.CompleteJob("job-fields", 42, 2500, "full")
+	if result.JobID != "job-fields" {
+		t.Errorf("JobID = %q, want %q", result.JobID, "job-fields")
+	}
+	if result.ExitCode != 42 {
+		t.Errorf("ExitCode = %d, want %d", result.ExitCode, 42)
+	}
+	if result.DurationSecs != 2.5 {
+		t.Errorf("DurationSecs = %f, want %f", result.DurationSecs, 2.5)
+	}
+	// Backwards-compat Output field
+	if result.Output != "stdout content\nstderr content\n" {
+		t.Errorf("Output = %q, want %q", result.Output, "stdout content\nstderr content\n")
+	}
+}
+
+func TestCoordinator_CompleteJobRetainsLogs(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Accumulate output
+	coord.AccumulateOutput("job-retain", "stdout", "retained stdout\n")
+	coord.AccumulateOutput("job-retain", "stderr", "retained stderr\n")
+
+	// CompleteJob should retain logs
+	_ = coord.CompleteJob("job-retain", 0, 1000, "minimal")
+
+	// Verify logs are retained (even after filtering removes stdout from result)
+	stdout, stderr, found := coord.GetRetainedLogs("job-retain")
+	if !found {
+		t.Fatal("expected to find retained logs")
+	}
+	if stdout != "retained stdout\n" {
+		t.Errorf("retained stdout = %q, want %q", stdout, "retained stdout\n")
+	}
+	if stderr != "retained stderr\n" {
+		t.Errorf("retained stderr = %q, want %q", stderr, "retained stderr\n")
+	}
+}
+
+func TestCoordinator_CompleteJobVerbosityLevels(t *testing.T) {
+	tests := []struct {
+		name         string
+		verbosity    string
+		expectStdout bool
+	}{
+		{"minimal", "minimal", false},
+		{"default empty", "", false},
+		{"normal", "normal", true},
+		{"full", "full", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewRegistry()
+			dispatcher := NewDispatcher(registry, nil)
+			coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+			jobID := "job-" + tt.name
+			coord.AccumulateOutput(jobID, "stdout", "stdout content\n")
+			coord.AccumulateOutput(jobID, "stderr", "stderr content\n")
+
+			result := coord.CompleteJob(jobID, 0, 1000, tt.verbosity)
+
+			hasStdout := result.Stdout != ""
+			if hasStdout != tt.expectStdout {
+				t.Errorf("stdout present = %v, want %v", hasStdout, tt.expectStdout)
+			}
+			// stderr should always be present
+			if result.Stderr != "stderr content\n" {
+				t.Errorf("stderr = %q, want %q", result.Stderr, "stderr content\n")
+			}
+		})
+	}
+}
+
 func TestCoordinator_VerbosityFiltering(t *testing.T) {
 	registry := NewRegistry()
 	dispatcher := NewDispatcher(registry, nil)

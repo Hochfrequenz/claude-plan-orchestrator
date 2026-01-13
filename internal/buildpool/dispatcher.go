@@ -10,9 +10,10 @@ import (
 
 // PendingJob tracks a job waiting for dispatch or completion
 type PendingJob struct {
-	Job      *buildprotocol.JobMessage
-	ResultCh chan *buildprotocol.JobResult
-	WorkerID string // Assigned worker (empty if queued)
+	Job       *buildprotocol.JobMessage
+	ResultCh  chan *buildprotocol.JobResult
+	WorkerID  string // Assigned worker (empty if queued)
+	Verbosity string // Output verbosity level
 }
 
 // SendFunc sends a job to a worker

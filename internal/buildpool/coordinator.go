@@ -503,6 +503,37 @@ func (c *Coordinator) FilterOutput(stdout, stderr, verbosity string) *buildproto
 	return result
 }
 
+// CompleteJob creates a JobResult with verbosity filtering and retains logs
+func (c *Coordinator) CompleteJob(jobID string, exitCode int, durationMs int64, verbosity string) *buildprotocol.JobResult {
+	stdout, stderr := c.GetSeparateOutput(jobID)
+
+	// Always retain full logs before filtering
+	c.outputMu.Lock()
+	if old := c.retainedLogs[c.retainIndex]; old != nil {
+		delete(c.retainByID, old.jobID)
+	}
+	entry := &completedLog{
+		jobID:  jobID,
+		stdout: stdout,
+		stderr: stderr,
+	}
+	c.retainedLogs[c.retainIndex] = entry
+	c.retainByID[jobID] = entry
+	c.retainIndex = (c.retainIndex + 1) % 50
+	c.outputMu.Unlock()
+
+	// Apply verbosity filtering
+	result := c.FilterOutput(stdout, stderr, verbosity)
+	result.JobID = jobID
+	result.ExitCode = exitCode
+	result.DurationSecs = float64(durationMs) / 1000
+
+	// Keep backwards-compat Output field
+	result.Output = stdout + stderr
+
+	return result
+}
+
 // tailLines returns the last n lines of s
 func tailLines(s string, n int) string {
 	if s == "" {
