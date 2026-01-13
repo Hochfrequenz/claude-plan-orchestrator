@@ -1071,18 +1071,31 @@ func (m Model) renderModules() string {
 
 func (m Model) renderWorkers() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("WORKERS"))
+	b.WriteString(titleStyle.Render("BUILD POOL"))
 	b.WriteString("\n")
 
-	if len(m.workers) == 0 {
-		b.WriteString(queuedStyle.Render("  No workers connected (using local fallback)"))
-		return b.String()
-	}
-
-	for _, w := range m.workers {
-		b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s: %d/%d jobs",
-			w.ID, w.ActiveJobs, w.MaxJobs)))
+	switch m.buildPoolStatus {
+	case "disabled":
+		b.WriteString(queuedStyle.Render("  Not enabled (set build_pool.enabled = true)"))
+	case "unreachable":
+		b.WriteString(queuedStyle.Render("  Coordinator not running"))
 		b.WriteString("\n")
+		b.WriteString(queuedStyle.Render("  Run: claude-orch build-pool start"))
+	case "connected":
+		if len(m.workers) == 0 {
+			b.WriteString(queuedStyle.Render("  Coordinator running, no workers connected"))
+			b.WriteString("\n")
+			b.WriteString(queuedStyle.Render("  Using local fallback for builds"))
+		} else {
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  Coordinator running, %d worker(s):", len(m.workers))))
+			b.WriteString("\n")
+			for _, w := range m.workers {
+				b.WriteString(queuedStyle.Render(fmt.Sprintf("    %s: %d/%d jobs",
+					w.ID, w.ActiveJobs, w.MaxJobs)))
+				b.WriteString("\n")
+			}
+			return strings.TrimSuffix(b.String(), "\n")
+		}
 	}
-	return strings.TrimSuffix(b.String(), "\n")
+	return b.String()
 }

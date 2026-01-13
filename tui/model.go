@@ -81,7 +81,8 @@ type Model struct {
 	statusMsg    string
 
 	// Build pool
-	buildPoolURL string
+	buildPoolURL    string
+	buildPoolStatus string // "disabled", "unreachable", "connected"
 
 	// Refresh
 	lastRefresh time.Time
@@ -188,6 +189,12 @@ func NewModel(cfg ModelConfig) Model {
 		}
 	}
 
+	// Determine initial build pool status
+	buildPoolStatus := "disabled"
+	if cfg.BuildPoolURL != "" {
+		buildPoolStatus = "unreachable" // Will be updated on first fetch
+	}
+
 	return Model{
 		maxActive:       cfg.MaxActive,
 		allTasks:        cfg.AllTasks,
@@ -202,6 +209,7 @@ func NewModel(cfg ModelConfig) Model {
 		projectRoot:     cfg.ProjectRoot,
 		worktreeDir:     cfg.WorktreeDir,
 		buildPoolURL:    cfg.BuildPoolURL,
+		buildPoolStatus: buildPoolStatus,
 		agentManager:    agentMgr,
 		worktreeManager: worktreeMgr,
 		planWatcher:     cfg.PlanWatcher,

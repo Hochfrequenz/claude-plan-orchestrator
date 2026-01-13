@@ -75,6 +75,7 @@ type AgentResumeMsg struct {
 // WorkersUpdateMsg updates the workers list from build pool
 type WorkersUpdateMsg struct {
 	Workers []*WorkerView
+	Status  string // "connected" or "unreachable"
 }
 
 // Update handles messages
@@ -354,6 +355,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case WorkersUpdateMsg:
 		m.workers = msg.Workers
+		m.buildPoolStatus = msg.Status
 		return m, nil
 
 	case AgentUpdateMsg:
@@ -855,13 +857,13 @@ func fetchWorkersCmd(buildPoolURL string) tea.Cmd {
 		client := &http.Client{Timeout: 2 * time.Second}
 		resp, err := client.Get(buildPoolURL + "/status")
 		if err != nil {
-			// Silently fail - coordinator might not be running
-			return WorkersUpdateMsg{Workers: nil}
+			// Coordinator not reachable
+			return WorkersUpdateMsg{Workers: nil, Status: "unreachable"}
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			return WorkersUpdateMsg{Workers: nil}
+			return WorkersUpdateMsg{Workers: nil, Status: "unreachable"}
 		}
 
 		var status struct {
@@ -874,7 +876,7 @@ func fetchWorkersCmd(buildPoolURL string) tea.Cmd {
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-			return WorkersUpdateMsg{Workers: nil}
+			return WorkersUpdateMsg{Workers: nil, Status: "unreachable"}
 		}
 
 		workers := make([]*WorkerView, 0, len(status.Workers))
@@ -888,6 +890,6 @@ func fetchWorkersCmd(buildPoolURL string) tea.Cmd {
 			})
 		}
 
-		return WorkersUpdateMsg{Workers: workers}
+		return WorkersUpdateMsg{Workers: workers, Status: "connected"}
 	}
 }
