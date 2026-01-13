@@ -507,3 +507,62 @@ func TestCoordinatorHeartbeat(t *testing.T) {
 		t.Error("worker should have been evicted due to heartbeat timeout")
 	}
 }
+
+func TestCoordinator_VerbosityFiltering(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Create 60 lines of stdout
+	var stdoutLines []string
+	for i := 1; i <= 60; i++ {
+		stdoutLines = append(stdoutLines, fmt.Sprintf("line %d", i))
+	}
+	stdout := strings.Join(stdoutLines, "\n") + "\n"
+	stderr := "error output\n"
+
+	tests := []struct {
+		name             string
+		verbosity        string
+		expectStdout     bool
+		expectFullStdout bool
+		expectStderr     bool
+	}{
+		{"minimal", "minimal", false, false, true},
+		{"minimal default", "", false, false, true},
+		{"normal", "normal", true, false, true},
+		{"full", "full", true, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := coord.FilterOutput(stdout, stderr, tt.verbosity)
+
+			hasStdout := result.Stdout != ""
+			hasStderr := result.Stderr != ""
+
+			if hasStdout != tt.expectStdout {
+				t.Errorf("stdout present = %v, want %v", hasStdout, tt.expectStdout)
+			}
+			if hasStderr != tt.expectStderr {
+				t.Errorf("stderr present = %v, want %v", hasStderr, tt.expectStderr)
+			}
+
+			if tt.expectFullStdout && result.Stdout != stdout {
+				t.Errorf("expected full stdout")
+			}
+
+			// For normal verbosity, should have last 50 lines only
+			if tt.verbosity == "normal" && result.Stdout != "" {
+				lines := strings.Split(strings.TrimSuffix(result.Stdout, "\n"), "\n")
+				if len(lines) != 50 {
+					t.Errorf("normal verbosity: got %d lines, want 50", len(lines))
+				}
+				// First retained line should be "line 11" (60-50+1)
+				if lines[0] != "line 11" {
+					t.Errorf("normal verbosity: first line = %q, want %q", lines[0], "line 11")
+				}
+			}
+		})
+	}
+}

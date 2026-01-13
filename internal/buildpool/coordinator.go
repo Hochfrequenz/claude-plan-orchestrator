@@ -484,3 +484,33 @@ func (c *Coordinator) GetRetainedLogs(jobID string) (stdout, stderr string, foun
 	}
 	return "", "", false
 }
+
+// FilterOutput applies verbosity filtering to stdout/stderr
+func (c *Coordinator) FilterOutput(stdout, stderr, verbosity string) *buildprotocol.JobResult {
+	result := &buildprotocol.JobResult{
+		Stderr: stderr,
+	}
+
+	switch verbosity {
+	case buildprotocol.VerbosityFull:
+		result.Stdout = stdout
+	case buildprotocol.VerbosityNormal:
+		result.Stdout = tailLines(stdout, 50)
+	default: // minimal or empty
+		// Only stderr, no stdout
+	}
+
+	return result
+}
+
+// tailLines returns the last n lines of s
+func tailLines(s string, n int) string {
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n") + "\n"
+}
