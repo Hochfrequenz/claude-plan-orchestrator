@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -933,6 +934,22 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		client := &http.Client{Timeout: 30 * time.Second}
 
+		// Get the git remote URL for the project (workers need remote URL, not local path)
+		repoURL := projectRoot
+		if cmd := exec.Command("git", "-C", projectRoot, "remote", "get-url", "origin"); cmd != nil {
+			if out, err := cmd.Output(); err == nil {
+				repoURL = strings.TrimSpace(string(out))
+			}
+		}
+
+		// Get current commit hash
+		commit := "HEAD"
+		if cmd := exec.Command("git", "-C", projectRoot, "rev-parse", "HEAD"); cmd != nil {
+			if out, err := cmd.Output(); err == nil {
+				commit = strings.TrimSpace(string(out))
+			}
+		}
+
 		// Submit a simple test command using the project repo
 		jobReq := struct {
 			Command string `json:"command"`
@@ -941,8 +958,8 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 			Timeout int    `json:"timeout"`
 		}{
 			Command: "echo 'hello from worker' && git rev-parse --short HEAD",
-			Repo:    projectRoot,
-			Commit:  "HEAD",
+			Repo:    repoURL,
+			Commit:  commit,
 			Timeout: 10,
 		}
 
