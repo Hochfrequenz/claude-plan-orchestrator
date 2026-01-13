@@ -88,3 +88,27 @@ func TestWorker_JobTracking(t *testing.T) {
 		t.Error("HasJob(job-1) after cancel = true, want false")
 	}
 }
+
+func TestWorker_ReconnectBackoff(t *testing.T) {
+	// Test backoff calculation
+	delays := []time.Duration{
+		calculateBackoff(0),
+		calculateBackoff(1),
+		calculateBackoff(2),
+		calculateBackoff(3),
+		calculateBackoff(10), // Should cap at max
+	}
+
+	if delays[0] != 1*time.Second {
+		t.Errorf("backoff(0) = %v, want 1s", delays[0])
+	}
+	if delays[1] != 2*time.Second {
+		t.Errorf("backoff(1) = %v, want 2s", delays[1])
+	}
+	if delays[2] != 4*time.Second {
+		t.Errorf("backoff(2) = %v, want 4s", delays[2])
+	}
+	if delays[4] > 60*time.Second {
+		t.Errorf("backoff(10) = %v, want <= 60s (capped)", delays[4])
+	}
+}

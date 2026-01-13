@@ -13,6 +13,25 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildprotocol"
 )
 
+// Backoff constants for reconnection
+const (
+	initialBackoff = 1 * time.Second
+	maxBackoff     = 60 * time.Second
+	backoffFactor  = 2
+)
+
+// calculateBackoff returns the delay for a given attempt number using exponential backoff
+func calculateBackoff(attempt int) time.Duration {
+	delay := initialBackoff
+	for i := 0; i < attempt; i++ {
+		delay *= backoffFactor
+		if delay > maxBackoff {
+			return maxBackoff
+		}
+	}
+	return delay
+}
+
 // WorkerConfig configures the worker client
 type WorkerConfig struct {
 	ServerURL   string
@@ -216,6 +235,52 @@ func (w *Worker) Stop() {
 	w.cancel()
 	if w.conn != nil {
 		w.conn.Close()
+	}
+}
+
+// RunWithReconnect runs the worker with automatic reconnection
+func (w *Worker) RunWithReconnect() error {
+	attempt := 0
+
+	for {
+		select {
+		case <-w.ctx.Done():
+			return nil
+		default:
+		}
+
+		// Try to connect
+		err := w.Connect()
+		if err != nil {
+			delay := calculateBackoff(attempt)
+			log.Printf("connection failed: %v, retrying in %v", err, delay)
+			attempt++
+
+			select {
+			case <-w.ctx.Done():
+				return nil
+			case <-time.After(delay):
+				continue
+			}
+		}
+
+		// Connected - reset backoff
+		attempt = 0
+		log.Printf("connected to coordinator")
+
+		// Run until disconnected
+		err = w.Run()
+		if err != nil {
+			log.Printf("disconnected: %v", err)
+		}
+
+		// Don't reconnect if we're shutting down
+		select {
+		case <-w.ctx.Done():
+			return nil
+		default:
+			// Will reconnect
+		}
 	}
 }
 
