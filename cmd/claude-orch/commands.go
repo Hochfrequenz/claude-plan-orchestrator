@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildpool"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/config"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
@@ -90,6 +92,33 @@ func init() {
 	}
 	serveCmd.Flags().IntVar(&servePort, "port", 8080, "port to listen on")
 	rootCmd.AddCommand(serveCmd)
+
+	// build-pool command group
+	buildPoolCmd := &cobra.Command{
+		Use:   "build-pool",
+		Short: "Manage the build worker pool",
+	}
+
+	buildPoolStartCmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start the build pool coordinator",
+		RunE:  runBuildPoolStart,
+	}
+
+	buildPoolStatusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show build pool status",
+		RunE:  runBuildPoolStatus,
+	}
+
+	buildPoolStopCmd := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the build pool coordinator",
+		RunE:  runBuildPoolStop,
+	}
+
+	buildPoolCmd.AddCommand(buildPoolStartCmd, buildPoolStatusCmd, buildPoolStopCmd)
+	rootCmd.AddCommand(buildPoolCmd)
 }
 
 func loadConfig() (*config.Config, error) {
@@ -486,4 +515,74 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Starting web UI at http://%s\n", addr)
 	return server.Start()
+}
+
+func runBuildPoolStart(cmd *cobra.Command, args []string) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	if !cfg.BuildPool.Enabled {
+		fmt.Println("Build pool is not enabled in config. Set build_pool.enabled = true")
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create registry
+	registry := buildpool.NewRegistry()
+
+	// Set up embedded worker if enabled
+	var embeddedFunc buildpool.EmbeddedWorkerFunc
+	if cfg.BuildPool.LocalFallback.Enabled {
+		embedded := buildpool.NewEmbeddedWorker(buildpool.EmbeddedConfig{
+			RepoDir:     cfg.General.ProjectRoot,
+			WorktreeDir: cfg.BuildPool.LocalFallback.WorktreeDir,
+			MaxJobs:     cfg.BuildPool.LocalFallback.MaxJobs,
+			UseNixShell: true,
+		})
+		embeddedFunc = embedded.Run
+	}
+
+	// Create dispatcher with embedded worker
+	dispatcher := buildpool.NewDispatcher(registry, embeddedFunc)
+
+	// Create coordinator
+	coord := buildpool.NewCoordinator(buildpool.CoordinatorConfig{
+		WebSocketPort:     cfg.BuildPool.WebSocketPort,
+		HeartbeatInterval: time.Duration(cfg.BuildPool.Timeouts.HeartbeatIntervalSecs) * time.Second,
+		HeartbeatTimeout:  time.Duration(cfg.BuildPool.Timeouts.HeartbeatTimeoutSecs) * time.Second,
+	}, registry, dispatcher)
+
+	// Start git daemon
+	gitDaemon := buildpool.NewGitDaemon(buildpool.GitDaemonConfig{
+		Port:    cfg.BuildPool.GitDaemonPort,
+		BaseDir: cfg.General.ProjectRoot,
+	})
+	if err := gitDaemon.Start(ctx); err != nil {
+		return fmt.Errorf("starting git daemon: %w", err)
+	}
+
+	fmt.Printf("Build pool coordinator starting...\n")
+	fmt.Printf("  WebSocket: :%d\n", cfg.BuildPool.WebSocketPort)
+	fmt.Printf("  Git daemon: :%d\n", cfg.BuildPool.GitDaemonPort)
+
+	// Start coordinator (blocks)
+	return coord.Start(ctx)
+}
+
+func runBuildPoolStatus(cmd *cobra.Command, args []string) error {
+	// TODO: Connect to running coordinator and query status
+	fmt.Println("Build pool status:")
+	fmt.Println("  (status query not yet implemented)")
+	return nil
+}
+
+func runBuildPoolStop(cmd *cobra.Command, args []string) error {
+	// TODO: Signal running coordinator to stop
+	fmt.Println("Stopping build pool...")
+	fmt.Println("  (graceful stop not yet implemented)")
+	return nil
 }
