@@ -619,12 +619,16 @@ func TestCoordinator_CompleteJobVerbosityLevels(t *testing.T) {
 func TestCoordinator_HTTPJobVerbosity(t *testing.T) {
 	registry := NewRegistry()
 
+	// Embedded worker returns known stdout/stderr for verification
+	const knownStdout = "STDOUT_MARKER_12345"
+	const knownStderr = "STDERR_MARKER_67890"
+
 	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
 		return &buildprotocol.JobResult{
 			JobID:    job.JobID,
 			ExitCode: 0,
-			Stdout:   "stdout content",
-			Stderr:   "stderr content",
+			Stdout:   knownStdout,
+			Stderr:   knownStderr,
 		}
 	}
 
@@ -635,29 +639,28 @@ func TestCoordinator_HTTPJobVerbosity(t *testing.T) {
 	defer server.Close()
 
 	tests := []struct {
-		name      string
-		body      string
-		expectErr bool
+		name         string
+		body         string
+		expectStdout bool // whether stdout should be in response output
+		expectStderr bool // whether stderr should be in response output
 	}{
 		{
-			name:      "default verbosity (no field)",
-			body:      `{"command":"echo test"}`,
-			expectErr: false,
+			name:         "explicit minimal verbosity",
+			body:         `{"command":"echo test","verbosity":"minimal"}`,
+			expectStdout: false,
+			expectStderr: true,
 		},
 		{
-			name:      "explicit minimal verbosity",
-			body:      `{"command":"echo test","verbosity":"minimal"}`,
-			expectErr: false,
+			name:         "explicit normal verbosity",
+			body:         `{"command":"echo test","verbosity":"normal"}`,
+			expectStdout: true,
+			expectStderr: true,
 		},
 		{
-			name:      "explicit normal verbosity",
-			body:      `{"command":"echo test","verbosity":"normal"}`,
-			expectErr: false,
-		},
-		{
-			name:      "explicit full verbosity",
-			body:      `{"command":"echo test","verbosity":"full"}`,
-			expectErr: false,
+			name:         "explicit full verbosity",
+			body:         `{"command":"echo test","verbosity":"full"}`,
+			expectStdout: true,
+			expectStderr: true,
 		},
 	}
 
@@ -669,29 +672,27 @@ func TestCoordinator_HTTPJobVerbosity(t *testing.T) {
 			}
 			defer resp.Body.Close()
 
-			if tt.expectErr {
-				if resp.StatusCode == http.StatusOK {
-					t.Errorf("expected error status, got %d", resp.StatusCode)
-				}
-				return
-			}
-
 			if resp.StatusCode != http.StatusOK {
-				t.Errorf("expected status OK, got %d", resp.StatusCode)
-				return
+				t.Fatalf("expected status OK, got %d", resp.StatusCode)
 			}
 
-			var result map[string]interface{}
+			// Decode into JobResponse which is what HandleJobSubmit returns
+			var result JobResponse
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 				t.Fatalf("decode response: %v", err)
 			}
 
-			// Verify response structure exists
-			if _, ok := result["job_id"]; !ok {
-				t.Error("response missing job_id")
+			// Verify stdout filtering via the Output field
+			// (Output = filtered Stdout + Stderr)
+			hasStdout := strings.Contains(result.Output, knownStdout)
+			if hasStdout != tt.expectStdout {
+				t.Errorf("stdout in output = %v, want %v (output=%q)", hasStdout, tt.expectStdout, result.Output)
 			}
-			if _, ok := result["exit_code"]; !ok {
-				t.Error("response missing exit_code")
+
+			// Verify stderr is always present
+			hasStderr := strings.Contains(result.Output, knownStderr)
+			if hasStderr != tt.expectStderr {
+				t.Errorf("stderr in output = %v, want %v (output=%q)", hasStderr, tt.expectStderr, result.Output)
 			}
 		})
 	}
