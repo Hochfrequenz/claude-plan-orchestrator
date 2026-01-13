@@ -65,14 +65,14 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// CLI flags override config
+	// CLI flags override config (only if explicitly set)
 	if serverURL != "" {
 		cfg.Server.URL = serverURL
 	}
 	if workerID != "" {
 		cfg.Worker.ID = workerID
 	}
-	if maxJobs > 0 {
+	if cmd.Flags().Changed("jobs") {
 		cfg.Worker.MaxJobs = maxJobs
 	}
 
