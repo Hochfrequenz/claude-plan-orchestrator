@@ -410,3 +410,50 @@ func TestMCPServer_WorkerStatus_ReturnsRealData(t *testing.T) {
 		t.Errorf("output missing max_jobs: %s", result.Output)
 	}
 }
+
+func TestMCPServer_ToolsHaveVerbosityParam(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil, nil)
+
+	tools := server.ListTools()
+
+	toolsWithVerbosity := []string{"build", "clippy", "test", "run_command"}
+
+	for _, tool := range tools {
+		shouldHave := false
+		for _, name := range toolsWithVerbosity {
+			if tool.Name == name {
+				shouldHave = true
+				break
+			}
+		}
+
+		if !shouldHave {
+			continue
+		}
+
+		props, ok := tool.InputSchema["properties"].(map[string]interface{})
+		if !ok {
+			t.Errorf("tool %s: properties not found", tool.Name)
+			continue
+		}
+
+		verbosity, ok := props["verbosity"].(map[string]interface{})
+		if !ok {
+			t.Errorf("tool %s: missing verbosity property", tool.Name)
+			continue
+		}
+
+		enum, ok := verbosity["enum"].([]string)
+		if !ok {
+			t.Errorf("tool %s: verbosity missing enum", tool.Name)
+			continue
+		}
+
+		expected := []string{"minimal", "normal", "full"}
+		if len(enum) != len(expected) {
+			t.Errorf("tool %s: verbosity enum = %v, want %v", tool.Name, enum, expected)
+		}
+	}
+}

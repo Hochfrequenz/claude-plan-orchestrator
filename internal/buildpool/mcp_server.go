@@ -37,6 +37,14 @@ type MCPTool struct {
 	InputSchema map[string]interface{} `json:"inputSchema"`
 }
 
+// verbositySchema defines the verbosity parameter for MCP tool schemas
+var verbositySchema = map[string]interface{}{
+	"type":        "string",
+	"description": "Output verbosity level: minimal (errors only), normal (default), full (all output)",
+	"enum":        []string{"minimal", "normal", "full"},
+	"default":     "normal",
+}
+
 // NewMCPServer creates a new MCP server
 func NewMCPServer(config MCPServerConfig, dispatcher *Dispatcher, registry *Registry) *MCPServer {
 	s := &MCPServer{
@@ -82,9 +90,10 @@ func (s *MCPServer) ListTools() []MCPTool {
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"release":  map[string]interface{}{"type": "boolean", "description": "Build in release mode"},
-					"features": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
-					"package":  map[string]interface{}{"type": "string", "description": "Specific package to build"},
+					"release":   map[string]interface{}{"type": "boolean", "description": "Build in release mode"},
+					"features":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"package":   map[string]interface{}{"type": "string", "description": "Specific package to build"},
+					"verbosity": verbositySchema,
 				},
 			},
 		},
@@ -94,8 +103,9 @@ func (s *MCPServer) ListTools() []MCPTool {
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"fix":      map[string]interface{}{"type": "boolean", "description": "Apply suggested fixes"},
-					"features": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"fix":       map[string]interface{}{"type": "boolean", "description": "Apply suggested fixes"},
+					"features":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"verbosity": verbositySchema,
 				},
 			},
 		},
@@ -109,6 +119,7 @@ func (s *MCPServer) ListTools() []MCPTool {
 					"package":   map[string]interface{}{"type": "string", "description": "Specific package to test"},
 					"features":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
 					"nocapture": map[string]interface{}{"type": "boolean", "description": "Show stdout/stderr"},
+					"verbosity": verbositySchema,
 				},
 			},
 		},
@@ -120,6 +131,7 @@ func (s *MCPServer) ListTools() []MCPTool {
 				"properties": map[string]interface{}{
 					"command":      map[string]interface{}{"type": "string", "description": "Command to run"},
 					"timeout_secs": map[string]interface{}{"type": "integer", "description": "Timeout in seconds"},
+					"verbosity":    verbositySchema,
 				},
 				"required": []string{"command"},
 			},
