@@ -104,16 +104,6 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating worker: %w", err)
 	}
 
-	// Connect
-	fmt.Printf("Connecting to %s as %s (max_jobs=%d)...\n",
-		cfg.Server.URL, cfg.Worker.ID, cfg.Worker.MaxJobs)
-
-	if err := worker.Connect(); err != nil {
-		return fmt.Errorf("connecting: %w", err)
-	}
-
-	fmt.Println("Connected. Waiting for jobs...")
-
 	// Handle shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -124,6 +114,9 @@ func run(cmd *cobra.Command, args []string) error {
 		worker.Stop()
 	}()
 
-	// Run (blocks until stopped)
-	return worker.Run()
+	fmt.Printf("Starting worker %s connecting to %s (max_jobs=%d)...\n",
+		cfg.Worker.ID, cfg.Server.URL, cfg.Worker.MaxJobs)
+
+	// Run with automatic reconnection (blocks until stopped)
+	return worker.RunWithReconnect()
 }
