@@ -977,7 +977,7 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 			Command: "echo 'hello from worker' && git rev-parse --short HEAD",
 			Repo:    gitURL,
 			Commit:  commit,
-			Timeout: 10,
+			Timeout: 120, // Allow time for nix develop on first run
 		}
 
 		reqBody, _ := json.Marshal(jobReq)
