@@ -127,8 +127,12 @@ func (w *Worker) Run() error {
 
 		case buildprotocol.TypeCancel:
 			var cancel buildprotocol.CancelMessage
-			json.Unmarshal(env.Payload, &cancel)
-			// TODO: implement job cancellation
+			if err := json.Unmarshal(env.Payload, &cancel); err != nil {
+				log.Printf("invalid cancel message: %v", err)
+				continue
+			}
+			log.Printf("cancelling job %s", cancel.JobID)
+			w.CancelJob(cancel.JobID)
 		}
 	}
 }
