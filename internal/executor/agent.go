@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	isync "github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
 )
 
 // orchestratorNamespace is a fixed UUID namespace for generating deterministic session IDs
@@ -42,6 +43,7 @@ type Agent struct {
 	TaskID       domain.TaskID
 	WorktreePath string
 	LogPath      string // Path to the output log file
+	EpicFilePath string // Path to the epic markdown file in the main repo (for sync)
 	PID          int    // Process ID of the running claude process
 	Status       AgentStatus
 	StartedAt    *time.Time
@@ -95,6 +97,7 @@ type AgentManager struct {
 	maxConcurrent int
 	agents        map[string]*Agent
 	store         AgentStore
+	syncer        *isync.Syncer
 	mu            sync.RWMutex
 }
 
@@ -109,6 +112,11 @@ func NewAgentManager(maxConcurrent int) *AgentManager {
 // SetStore sets the persistence store for the agent manager
 func (m *AgentManager) SetStore(store AgentStore) {
 	m.store = store
+}
+
+// SetSyncer sets the syncer for updating epic and README status
+func (m *AgentManager) SetSyncer(syncer *isync.Syncer) {
+	m.syncer = syncer
 }
 
 // SetMaxConcurrent updates the maximum number of concurrent agents
@@ -304,6 +312,12 @@ func (a *Agent) Start(ctx context.Context) error {
 	now := time.Now()
 	a.StartedAt = &now
 	a.Status = AgentRunning
+
+	// Call status change callback for running status (triggers sync to in_progress)
+	callback := a.OnStatusChange
+	if callback != nil {
+		go callback(a, AgentRunning, "")
+	}
 
 	// Stream output in background
 	go a.streamOutput(stdout, stderr)
@@ -554,6 +568,12 @@ func (a *Agent) Resume(ctx context.Context) error {
 	a.FinishedAt = nil
 	a.Status = AgentRunning
 	a.Error = nil
+
+	// Call status change callback for running status (triggers sync to in_progress)
+	callback := a.OnStatusChange
+	if callback != nil {
+		go callback(a, AgentRunning, "")
+	}
 
 	// Stream output in background
 	go a.streamOutput(stdout, stderr)
@@ -934,9 +954,10 @@ func (m *AgentManager) RecoverAgents(ctx context.Context) ([]*Agent, error) {
 	return recovered, nil
 }
 
-// CreateStatusCallback returns a callback that updates the manager's store
+// CreateStatusCallback returns a callback that updates the manager's store and syncs status
 func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 	return func(agent *Agent, newStatus AgentStatus, errMsg string) {
+		// Update database
 		if m.store != nil && agent.ID != "" {
 			m.store.UpdateAgentRunStatus(agent.ID, string(newStatus), errMsg)
 			// Save token usage when agent completes
@@ -945,6 +966,30 @@ func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 				if tokensIn > 0 || tokensOut > 0 {
 					m.store.UpdateAgentRunUsage(agent.ID, tokensIn, tokensOut, cost)
 				}
+			}
+		}
+
+		// Sync epic and README status
+		if m.syncer != nil && agent.EpicFilePath != "" {
+			var taskStatus domain.TaskStatus
+			switch newStatus {
+			case AgentCompleted:
+				taskStatus = domain.StatusComplete
+			case AgentRunning:
+				taskStatus = domain.StatusInProgress
+			default:
+				// Don't sync for other statuses (failed, stuck, queued)
+				return
+			}
+
+			// Update epic frontmatter
+			if err := m.syncer.UpdateEpicFrontmatter(agent.EpicFilePath, taskStatus); err != nil {
+				fmt.Printf("Warning: failed to update epic frontmatter for %s: %v\n", agent.TaskID.String(), err)
+			}
+
+			// Update README status emoji
+			if err := m.syncer.UpdateTaskStatus(agent.TaskID, taskStatus); err != nil {
+				fmt.Printf("Warning: failed to update README status for %s: %v\n", agent.TaskID.String(), err)
 			}
 		}
 	}

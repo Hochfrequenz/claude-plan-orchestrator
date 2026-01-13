@@ -120,3 +120,41 @@ func (s *Syncer) SyncAll(tasks []*domain.Task) error {
 	}
 	return nil
 }
+
+// UpdateEpicFrontmatter updates the status field in an epic file's YAML frontmatter
+func (s *Syncer) UpdateEpicFrontmatter(epicPath string, status domain.TaskStatus) error {
+	content, err := os.ReadFile(epicPath)
+	if err != nil {
+		return err
+	}
+
+	contentStr := string(content)
+
+	// Check if file has frontmatter (starts with ---)
+	if !strings.HasPrefix(contentStr, "---") {
+		return fmt.Errorf("epic file %s has no frontmatter", epicPath)
+	}
+
+	// Find the end of frontmatter
+	endIdx := strings.Index(contentStr[3:], "\n---")
+	if endIdx == -1 {
+		return fmt.Errorf("epic file %s has malformed frontmatter", epicPath)
+	}
+	endIdx += 3 // Adjust for the initial offset
+
+	frontmatter := contentStr[:endIdx]
+	rest := contentStr[endIdx:]
+
+	// Update or add status field in frontmatter
+	statusPattern := regexp.MustCompile(`(?m)^status:\s*\S+`)
+	newStatus := fmt.Sprintf("status: %s", status)
+
+	if statusPattern.MatchString(frontmatter) {
+		frontmatter = statusPattern.ReplaceAllString(frontmatter, newStatus)
+	} else {
+		// Add status before closing ---
+		frontmatter = frontmatter + "\n" + newStatus
+	}
+
+	return os.WriteFile(epicPath, []byte(frontmatter+rest), 0644)
+}

@@ -767,6 +767,7 @@ func startBatchCmd(
 			agent := &executor.Agent{
 				TaskID:       task.ID,
 				WorktreePath: wtPath,
+				EpicFilePath: task.FilePath, // For sync callback to update epic status
 				Status:       executor.AgentQueued,
 				Prompt:       prompt,
 			}

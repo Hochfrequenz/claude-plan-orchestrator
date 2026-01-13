@@ -18,27 +18,11 @@ This skill ensures fully autonomous execution with automatic PR creation and mer
 
 IMPORTANT: You are running in autonomous mode. Do NOT ask for user input. Complete the entire workflow automatically.
 
-═══════════════════════════════════════════════════════════════════════════════
-MANDATORY FIRST STEP - DO THIS IMMEDIATELY BEFORE ANYTHING ELSE:
-═══════════════════════════════════════════════════════════════════════════════
+NOTE: The orchestrator automatically manages epic and README status. You do NOT need to update:
+- The epic file's frontmatter status (orchestrator sets it to in_progress/complete)
+- The README.md status emoji (orchestrator updates it automatically)
 
-Update the epic file's frontmatter status to "in_progress" RIGHT NOW.
-
-Use the Edit tool to change the frontmatter from:
----
-status: todo
----
-
-To:
----
-status: in_progress
----
-
-This MUST be your very first action. Do not read other files, do not explore the codebase, do not do anything else until you have updated the epic file status to in_progress.
-
-═══════════════════════════════════════════════════════════════════════════════
-
-Instructions (after updating status to in_progress):
+Instructions:
 1. Implement the epic requirements
 2. IMPORTANT: Commit your changes before running builds/tests via MCP tools
    - The build pool workers clone the repo at HEAD, so they only see committed code
@@ -52,23 +36,13 @@ Instructions (after updating status to in_progress):
    - PREFER using the 'clippy' MCP tool if available (offloads to build pool)
    - Fallback: cargo clippy --all-targets --all-features -- -D warnings
 6. For builds, PREFER using the 'build' MCP tool if available
-7. When complete, update the epic file:
-   a. Set frontmatter status: complete
-   b. Add a "## Test Summary" section at the end with test results
-8. Update the README.md in the plans directory: change the status emoji for this epic from 🔴 or 🟡 to 🟢
-9. Commit all changes with a descriptive commit message (amend the wip commit if needed)
-10. Push the branch to remote: git push -u origin HEAD
-11. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
-12. Merge the PR using: gh pr merge --squash --delete-branch
+7. When complete, add a "## Test Summary" section at the end of the epic file with test results
+8. Commit all changes with a descriptive commit message (amend the wip commit if needed)
+9. Push the branch to remote: git push -u origin HEAD
+10. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
+11. Merge the PR using: gh pr merge --squash --delete-branch
 
-Epic file format when complete:
----
-status: complete
-priority: ...
----
-
-# Epic Title
-... epic content ...
+Test Summary format to add to epic file:
 
 ## Test Summary
 

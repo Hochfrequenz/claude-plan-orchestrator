@@ -453,6 +453,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		Queued:          queued,
 		ProjectRoot:     cfg.General.ProjectRoot,
 		WorktreeDir:     cfg.General.WorktreeDir,
+		PlansDir:        cfg.General.ProjectRoot + "/docs/plans",
 		BuildPoolURL:    buildPoolURL,
 		AgentManager:    agentMgr,
 		RecoveredAgents: recoveredViews,

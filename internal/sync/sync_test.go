@@ -101,6 +101,69 @@ func TestParseStatusEmoji(t *testing.T) {
 	}
 }
 
+func TestUpdateEpicFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	syncer := New(dir)
+
+	t.Run("updates existing status", func(t *testing.T) {
+		epicPath := filepath.Join(dir, "epic-01.md")
+		content := `---
+status: todo
+priority: high
+---
+
+# Epic 01: Setup
+`
+		os.WriteFile(epicPath, []byte(content), 0644)
+
+		err := syncer.UpdateEpicFrontmatter(epicPath, domain.StatusInProgress)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		updated, _ := os.ReadFile(epicPath)
+		if !containsString(string(updated), "status: in_progress") {
+			t.Error("Status should be updated to in_progress")
+		}
+		if !containsString(string(updated), "priority: high") {
+			t.Error("Other frontmatter fields should be preserved")
+		}
+	})
+
+	t.Run("adds status if missing", func(t *testing.T) {
+		epicPath := filepath.Join(dir, "epic-02.md")
+		content := `---
+priority: low
+---
+
+# Epic 02: Feature
+`
+		os.WriteFile(epicPath, []byte(content), 0644)
+
+		err := syncer.UpdateEpicFrontmatter(epicPath, domain.StatusComplete)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		updated, _ := os.ReadFile(epicPath)
+		if !containsString(string(updated), "status: complete") {
+			t.Error("Status should be added")
+		}
+	})
+
+	t.Run("errors on missing frontmatter", func(t *testing.T) {
+		epicPath := filepath.Join(dir, "epic-03.md")
+		content := `# Epic 03: No Frontmatter
+`
+		os.WriteFile(epicPath, []byte(content), 0644)
+
+		err := syncer.UpdateEpicFrontmatter(epicPath, domain.StatusInProgress)
+		if err == nil {
+			t.Error("Should error on missing frontmatter")
+		}
+	})
+}
+
 func containsString(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

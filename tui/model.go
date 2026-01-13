@@ -8,6 +8,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
+	isync "github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
 )
 
 // ViewMode determines how tasks are displayed
@@ -128,6 +129,7 @@ type ModelConfig struct {
 	Workers         []*WorkerView
 	ProjectRoot     string
 	WorktreeDir     string
+	PlansDir        string // Directory containing plans (for sync)
 	BuildPoolURL    string // URL for build pool status (e.g., "http://localhost:8081")
 	AgentManager    *executor.AgentManager
 	WorktreeManager *executor.WorktreeManager
@@ -166,6 +168,12 @@ func NewModel(cfg ModelConfig) Model {
 	agentMgr := cfg.AgentManager
 	if agentMgr == nil {
 		agentMgr = executor.NewAgentManager(cfg.MaxActive)
+	}
+
+	// Set up syncer for agent manager if plans directory is configured
+	if cfg.PlansDir != "" {
+		syncer := isync.New(cfg.PlansDir)
+		agentMgr.SetSyncer(syncer)
 	}
 
 	worktreeMgr := cfg.WorktreeManager
