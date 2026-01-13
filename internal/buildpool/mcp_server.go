@@ -266,15 +266,12 @@ func (s *MCPServer) workerStatus() (*buildprotocol.JobResult, error) {
 
 	if s.registry != nil {
 		for _, w := range s.registry.All() {
-			w.mu.Lock()
-			activeJobs := w.MaxJobs - w.Slots
-			w.mu.Unlock()
-
+			maxJobs, slots, connectedAt := w.GetStatus()
 			workers = append(workers, map[string]interface{}{
 				"id":              w.ID,
-				"max_jobs":        w.MaxJobs,
-				"active_jobs":     activeJobs,
-				"connected_since": w.ConnectedAt.Format(time.RFC3339),
+				"max_jobs":        maxJobs,
+				"active_jobs":     maxJobs - slots,
+				"connected_since": connectedAt.Format(time.RFC3339),
 			})
 		}
 	}

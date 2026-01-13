@@ -52,6 +52,13 @@ func (w *ConnectedWorker) SetLastHeartbeat(t time.Time) {
 	w.LastHeartbeat = t
 }
 
+// GetStatus returns a snapshot of worker status fields (thread-safe)
+func (w *ConnectedWorker) GetStatus() (maxJobs, slots int, connectedAt time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.MaxJobs, w.Slots, w.ConnectedAt
+}
+
 // WriteMessage sends a message to the worker connection (thread-safe)
 func (w *ConnectedWorker) WriteMessage(messageType int, data []byte) error {
 	w.writeMu.Lock()
