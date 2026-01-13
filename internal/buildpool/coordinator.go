@@ -166,10 +166,11 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 				log.Printf("failed to unmarshal %s message: %v", env.Type, err)
 				continue
 			}
+			output := c.GetAndClearOutput(errMsg.JobID)
 			c.dispatcher.Complete(errMsg.JobID, &buildprotocol.JobResult{
 				JobID:    errMsg.JobID,
 				ExitCode: -1,
-				Output:   "Error: " + errMsg.Message,
+				Output:   output + "Error: " + errMsg.Message,
 			})
 
 		case buildprotocol.TypePong:
