@@ -72,3 +72,35 @@ func TestDispatcher_DispatchToWorker(t *testing.T) {
 		t.Errorf("got job ID=%s, want job-1", sentJob.JobID)
 	}
 }
+
+func TestDispatcher_Cancel(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+
+	var cancelledJobs []string
+	dispatcher.SetCancelFunc(func(workerID, jobID string) error {
+		cancelledJobs = append(cancelledJobs, jobID)
+		return nil
+	})
+
+	// Submit a job
+	job := &buildprotocol.JobMessage{JobID: "job-1"}
+	dispatcher.Submit(job)
+
+	// Simulate assignment to a worker
+	dispatcher.mu.Lock()
+	if pj, ok := dispatcher.pending["job-1"]; ok {
+		pj.WorkerID = "worker-1"
+	}
+	dispatcher.mu.Unlock()
+
+	// Cancel the job
+	err := dispatcher.Cancel("job-1")
+	if err != nil {
+		t.Errorf("Cancel: %v", err)
+	}
+
+	if len(cancelledJobs) != 1 || cancelledJobs[0] != "job-1" {
+		t.Errorf("cancelledJobs = %v, want [job-1]", cancelledJobs)
+	}
+}

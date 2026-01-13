@@ -2,6 +2,7 @@
 package buildpool
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildprotocol"
@@ -20,11 +21,15 @@ type SendFunc func(w *ConnectedWorker, job *buildprotocol.JobMessage) error
 // EmbeddedWorkerFunc runs a job on the embedded worker
 type EmbeddedWorkerFunc func(job *buildprotocol.JobMessage) *buildprotocol.JobResult
 
+// CancelFunc sends a cancel message to a worker
+type CancelFunc func(workerID, jobID string) error
+
 // Dispatcher manages job queue and assignment
 type Dispatcher struct {
-	registry *Registry
-	embedded EmbeddedWorkerFunc
-	sendFunc SendFunc
+	registry   *Registry
+	embedded   EmbeddedWorkerFunc
+	sendFunc   SendFunc
+	cancelFunc CancelFunc
 
 	queue   []*PendingJob
 	pending map[string]*PendingJob // jobID -> pending job
@@ -43,6 +48,11 @@ func NewDispatcher(registry *Registry, embedded EmbeddedWorkerFunc) *Dispatcher 
 // SetSendFunc sets the function used to send jobs to workers
 func (d *Dispatcher) SetSendFunc(fn SendFunc) {
 	d.sendFunc = fn
+}
+
+// SetCancelFunc sets the function used to cancel jobs on workers
+func (d *Dispatcher) SetCancelFunc(fn CancelFunc) {
+	d.cancelFunc = fn
 }
 
 // Submit adds a job to the queue and returns a channel for the result
@@ -111,6 +121,40 @@ func (d *Dispatcher) Complete(jobID string, result *buildprotocol.JobResult) {
 		pj.ResultCh <- result
 		close(pj.ResultCh)
 	}
+}
+
+// Cancel cancels a job
+func (d *Dispatcher) Cancel(jobID string) error {
+	d.mu.Lock()
+	pj, ok := d.pending[jobID]
+	workerID := ""
+	if ok {
+		workerID = pj.WorkerID
+	}
+	d.mu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+
+	// If assigned to a worker, send cancel message
+	if workerID != "" && d.cancelFunc != nil {
+		return d.cancelFunc(workerID, jobID)
+	}
+
+	// If still queued, just remove from queue
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var remaining []*PendingJob
+	for _, q := range d.queue {
+		if q.Job.JobID != jobID {
+			remaining = append(remaining, q)
+		}
+	}
+	d.queue = remaining
+	delete(d.pending, jobID)
+
+	return nil
 }
 
 // QueueLength returns the number of queued jobs
