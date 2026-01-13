@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -60,6 +61,11 @@ var defaultConfigPaths = []string{
 }
 
 func run(cmd *cobra.Command, args []string) error {
+	// Check prerequisites
+	if err := checkPrerequisites(); err != nil {
+		return err
+	}
+
 	var cfg Config
 
 	// Determine config file path
@@ -141,4 +147,30 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Run with automatic reconnection (blocks until stopped)
 	return worker.RunWithReconnect()
+}
+
+func checkPrerequisites() error {
+	// Check for nix (required for reproducible builds)
+	if _, err := exec.LookPath("nix"); err != nil {
+		return fmt.Errorf(`nix is required but not found in PATH
+
+Build agents run jobs inside 'nix develop' for reproducible builds.
+
+Install Nix:
+  # Recommended: Determinate Nix Installer
+  curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+
+  # Or official installer
+  sh <(curl -L https://nixos.org/nix/install) --daemon
+
+After installation, ensure nix is in your PATH:
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh`)
+	}
+
+	// Check for git (required for cloning repos)
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("git is required but not found in PATH")
+	}
+
+	return nil
 }

@@ -376,6 +376,34 @@ Build pool coordinator starting...
 
 ### Deploying Build Agents
 
+#### Prerequisites
+
+Build agents require **Nix** to be installed. Jobs run inside `nix develop` to ensure reproducible builds with all dependencies available.
+
+**Install Nix:**
+
+```bash
+# Linux/macOS (recommended: Determinate Nix Installer)
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+
+# Or official installer
+sh <(curl -L https://nixos.org/nix/install) --daemon
+```
+
+After installation, ensure `nix` is in your PATH:
+
+```bash
+# Verify installation
+nix --version
+
+# If not found, source the profile
+. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+```
+
+**Additional requirements:**
+- Git (for cloning repositories)
+- Network access to the coordinator host
+
 #### Option 1: Quick Install (Recommended)
 
 Download a pre-built binary:
