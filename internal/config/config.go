@@ -45,11 +45,12 @@ type WebConfig struct {
 
 // BuildPoolConfig holds build pool settings
 type BuildPoolConfig struct {
-	Enabled       bool                   `toml:"enabled"`
-	WebSocketPort int                    `toml:"websocket_port"`
-	GitDaemonPort int                    `toml:"git_daemon_port"`
-	LocalFallback LocalFallbackConfig    `toml:"local_fallback"`
-	Timeouts      BuildPoolTimeoutConfig `toml:"timeouts"`
+	Enabled             bool                   `toml:"enabled"`
+	WebSocketPort       int                    `toml:"websocket_port"`
+	GitDaemonPort       int                    `toml:"git_daemon_port"`
+	GitDaemonListenAddr string                 `toml:"git_daemon_listen_addr"` // e.g., "127.0.0.1" for local only
+	LocalFallback       LocalFallbackConfig    `toml:"local_fallback"`
+	Timeouts            BuildPoolTimeoutConfig `toml:"timeouts"`
 }
 
 // LocalFallbackConfig configures local job execution

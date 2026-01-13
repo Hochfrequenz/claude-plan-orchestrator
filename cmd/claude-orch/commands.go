@@ -564,8 +564,9 @@ func runBuildPoolStart(cmd *cobra.Command, args []string) error {
 
 	// Start git daemon
 	gitDaemon := buildpool.NewGitDaemon(buildpool.GitDaemonConfig{
-		Port:    cfg.BuildPool.GitDaemonPort,
-		BaseDir: cfg.General.ProjectRoot,
+		Port:       cfg.BuildPool.GitDaemonPort,
+		BaseDir:    cfg.General.ProjectRoot,
+		ListenAddr: cfg.BuildPool.GitDaemonListenAddr,
 	})
 	if err := gitDaemon.Start(ctx); err != nil {
 		return fmt.Errorf("starting git daemon: %w", err)
