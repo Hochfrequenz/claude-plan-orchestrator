@@ -40,22 +40,26 @@ This MUST be your very first action. Do not read other files, do not explore the
 
 Instructions (after updating status to in_progress):
 1. Implement the epic requirements
-2. Run tests to verify your implementation
+2. IMPORTANT: Commit your changes before running builds/tests via MCP tools
+   - The build pool workers clone the repo at HEAD, so they only see committed code
+   - Use: git add -A && git commit -m "wip: [description]"
+   - You can amend this commit later with a better message
+3. Run tests to verify your implementation
    - PREFER using the 'test' MCP tool if available (offloads to build pool)
    - Fallback: cargo test
-3. Ensure all tests pass
-4. Run clippy and fix any warnings
+4. Ensure all tests pass
+5. Run clippy and fix any warnings
    - PREFER using the 'clippy' MCP tool if available (offloads to build pool)
    - Fallback: cargo clippy --all-targets --all-features -- -D warnings
-5. For builds, PREFER using the 'build' MCP tool if available
-6. When complete, update the epic file:
+6. For builds, PREFER using the 'build' MCP tool if available
+7. When complete, update the epic file:
    a. Set frontmatter status: complete
    b. Add a "## Test Summary" section at the end with test results
-7. Update the README.md in the plans directory: change the status emoji for this epic from 🔴 or 🟡 to 🟢
-8. Commit all changes with a descriptive commit message
-9. Push the branch to remote: git push -u origin HEAD
-10. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
-11. Merge the PR using: gh pr merge --squash --delete-branch
+8. Update the README.md in the plans directory: change the status emoji for this epic from 🔴 or 🟡 to 🟢
+9. Commit all changes with a descriptive commit message (amend the wip commit if needed)
+10. Push the branch to remote: git push -u origin HEAD
+11. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
+12. Merge the PR using: gh pr merge --squash --delete-branch
 
 Epic file format when complete:
 ---
