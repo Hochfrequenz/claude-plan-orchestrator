@@ -14,6 +14,7 @@ type Config struct {
 	Claude        ClaudeConfig        `toml:"claude"`
 	Notifications NotificationsConfig `toml:"notifications"`
 	Web           WebConfig           `toml:"web"`
+	BuildPool     BuildPoolConfig     `toml:"build_pool"`
 }
 
 // GeneralConfig holds general settings
@@ -42,6 +43,29 @@ type WebConfig struct {
 	Host string `toml:"host"`
 }
 
+// BuildPoolConfig holds build pool settings
+type BuildPoolConfig struct {
+	Enabled       bool                   `toml:"enabled"`
+	WebSocketPort int                    `toml:"websocket_port"`
+	GitDaemonPort int                    `toml:"git_daemon_port"`
+	LocalFallback LocalFallbackConfig    `toml:"local_fallback"`
+	Timeouts      BuildPoolTimeoutConfig `toml:"timeouts"`
+}
+
+// LocalFallbackConfig configures local job execution
+type LocalFallbackConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	MaxJobs     int    `toml:"max_jobs"`
+	WorktreeDir string `toml:"worktree_dir"`
+}
+
+// BuildPoolTimeoutConfig configures timeouts
+type BuildPoolTimeoutConfig struct {
+	JobDefaultSecs        int `toml:"job_default_secs"`
+	HeartbeatIntervalSecs int `toml:"heartbeat_interval_secs"`
+	HeartbeatTimeoutSecs  int `toml:"heartbeat_timeout_secs"`
+}
+
 // Default returns a Config with sensible defaults
 func Default() *Config {
 	home, _ := os.UserHomeDir()
@@ -62,6 +86,21 @@ func Default() *Config {
 		Web: WebConfig{
 			Port: 8080,
 			Host: "127.0.0.1",
+		},
+		BuildPool: BuildPoolConfig{
+			Enabled:       false,
+			WebSocketPort: 8081,
+			GitDaemonPort: 9418,
+			LocalFallback: LocalFallbackConfig{
+				Enabled:     true,
+				MaxJobs:     2,
+				WorktreeDir: filepath.Join(home, ".claude-orchestrator", "build-pool", "local"),
+			},
+			Timeouts: BuildPoolTimeoutConfig{
+				JobDefaultSecs:        300,
+				HeartbeatIntervalSecs: 30,
+				HeartbeatTimeoutSecs:  10,
+			},
 		},
 	}
 }

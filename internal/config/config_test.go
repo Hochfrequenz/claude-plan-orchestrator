@@ -71,3 +71,17 @@ func TestExpandPath(t *testing.T) {
 		}
 	}
 }
+
+func TestConfig_BuildPoolDefaults(t *testing.T) {
+	cfg := Default()
+
+	if cfg.BuildPool.WebSocketPort != 8081 {
+		t.Errorf("got websocket_port=%d, want 8081", cfg.BuildPool.WebSocketPort)
+	}
+	if cfg.BuildPool.GitDaemonPort != 9418 {
+		t.Errorf("got git_daemon_port=%d, want 9418", cfg.BuildPool.GitDaemonPort)
+	}
+	if !cfg.BuildPool.LocalFallback.Enabled {
+		t.Error("local fallback should be enabled by default")
+	}
+}
