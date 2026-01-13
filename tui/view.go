@@ -95,6 +95,10 @@ func (m Model) View() string {
 		b.WriteString(sectionStyle.Width(m.width - 2).Render(runningSection))
 		b.WriteString("\n")
 
+		workersSection := m.renderWorkers()
+		b.WriteString(sectionStyle.Width(m.width - 2).Render(workersSection))
+		b.WriteString("\n")
+
 		queuedSection := m.renderQueued()
 		b.WriteString(sectionStyle.Width(m.width - 2).Render(queuedSection))
 		b.WriteString("\n")
@@ -1063,4 +1067,18 @@ func (m Model) renderModules() string {
 	}
 
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func (m Model) renderWorkers() string {
+	if len(m.workers) == 0 {
+		return "No workers connected (using local fallback)"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Workers:\n")
+	for _, w := range m.workers {
+		sb.WriteString(fmt.Sprintf("  %s: %d/%d jobs\n",
+			w.ID, w.ActiveJobs, w.MaxJobs))
+	}
+	return sb.String()
 }

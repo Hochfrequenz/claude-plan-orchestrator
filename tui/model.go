@@ -37,6 +37,7 @@ type Model struct {
 	queued         []*domain.Task
 	allTasks       []*domain.Task
 	flagged        []*FlaggedPR
+	workers        []*WorkerView
 	modules        []*ModuleSummary
 	completedTasks map[string]bool // Track completed task IDs for dependency checking
 
@@ -105,6 +106,14 @@ type FlaggedPR struct {
 	Reason   string
 }
 
+// WorkerView represents a connected worker for display
+type WorkerView struct {
+	ID          string
+	MaxJobs     int
+	ActiveJobs  int
+	ConnectedAt time.Time
+}
+
 // ModelConfig holds initial data for the TUI model
 type ModelConfig struct {
 	MaxActive       int
@@ -112,6 +121,7 @@ type ModelConfig struct {
 	Queued          []*domain.Task
 	Agents          []*AgentView
 	Flagged         []*FlaggedPR
+	Workers         []*WorkerView
 	ProjectRoot     string
 	WorktreeDir     string
 	AgentManager    *executor.AgentManager
@@ -180,6 +190,7 @@ func NewModel(cfg ModelConfig) Model {
 		queued:          cfg.Queued,
 		agents:          agents,
 		flagged:         cfg.Flagged,
+		workers:         cfg.Workers,
 		modules:         modules,
 		completedTasks:  completedTasks,
 		activeCount:     activeCount,
