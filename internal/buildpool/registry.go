@@ -19,6 +19,7 @@ type ConnectedWorker struct {
 	ConnectedAt   time.Time
 	LastHeartbeat time.Time
 	mu            sync.Mutex
+	writeMu       sync.Mutex // protects Conn writes
 }
 
 // UpdateSlots updates available slots (thread-safe)
@@ -35,6 +36,27 @@ func (w *ConnectedWorker) DecrementSlots() {
 	if w.Slots > 0 {
 		w.Slots--
 	}
+}
+
+// GetLastHeartbeat returns the last heartbeat time (thread-safe)
+func (w *ConnectedWorker) GetLastHeartbeat() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.LastHeartbeat
+}
+
+// SetLastHeartbeat sets the last heartbeat time (thread-safe)
+func (w *ConnectedWorker) SetLastHeartbeat(t time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.LastHeartbeat = t
+}
+
+// WriteMessage sends a message to the worker connection (thread-safe)
+func (w *ConnectedWorker) WriteMessage(messageType int, data []byte) error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	return w.Conn.WriteMessage(messageType, data)
 }
 
 // Registry tracks connected workers

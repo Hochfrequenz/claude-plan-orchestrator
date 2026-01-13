@@ -85,6 +85,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 		if workerID != "" {
 			c.registry.Unregister(workerID)
 			c.dispatcher.RequeueWorkerJobs(workerID)
+			c.dispatcher.TryDispatch()
 			log.Printf("worker %s disconnected", workerID)
 		}
 	}()
@@ -123,6 +124,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 		case buildprotocol.TypeReady:
 			var ready buildprotocol.ReadyMessage
 			if err := json.Unmarshal(env.Payload, &ready); err != nil {
+				log.Printf("failed to unmarshal %s message: %v", env.Type, err)
 				continue
 			}
 			if w := c.registry.Get(workerID); w != nil {
@@ -133,6 +135,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 		case buildprotocol.TypeOutput:
 			var output buildprotocol.OutputMessage
 			if err := json.Unmarshal(env.Payload, &output); err != nil {
+				log.Printf("failed to unmarshal %s message: %v", env.Type, err)
 				continue
 			}
 			// TODO: forward to MCP result stream
@@ -140,6 +143,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 		case buildprotocol.TypeComplete:
 			var complete buildprotocol.CompleteMessage
 			if err := json.Unmarshal(env.Payload, &complete); err != nil {
+				log.Printf("failed to unmarshal %s message: %v", env.Type, err)
 				continue
 			}
 			c.dispatcher.Complete(complete.JobID, &buildprotocol.JobResult{
@@ -151,6 +155,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 		case buildprotocol.TypeError:
 			var errMsg buildprotocol.ErrorMessage
 			if err := json.Unmarshal(env.Payload, &errMsg); err != nil {
+				log.Printf("failed to unmarshal %s message: %v", env.Type, err)
 				continue
 			}
 			c.dispatcher.Complete(errMsg.JobID, &buildprotocol.JobResult{
@@ -161,7 +166,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 
 		case buildprotocol.TypePong:
 			if w := c.registry.Get(workerID); w != nil {
-				w.LastHeartbeat = time.Now()
+				w.SetLastHeartbeat(time.Now())
 			}
 		}
 	}
@@ -172,7 +177,7 @@ func (c *Coordinator) sendJobToWorker(w *ConnectedWorker, job *buildprotocol.Job
 	if err != nil {
 		return err
 	}
-	return w.Conn.WriteMessage(websocket.TextMessage, data)
+	return w.WriteMessage(websocket.TextMessage, data)
 }
 
 // Start starts the coordinator server
@@ -219,7 +224,8 @@ func (c *Coordinator) sendHeartbeats() {
 
 	for _, w := range c.registry.All() {
 		// Check for heartbeat timeout
-		if !w.LastHeartbeat.IsZero() && time.Since(w.LastHeartbeat) > c.config.HeartbeatTimeout {
+		lastHeartbeat := w.GetLastHeartbeat()
+		if !lastHeartbeat.IsZero() && time.Since(lastHeartbeat) > c.config.HeartbeatTimeout {
 			log.Printf("worker %s heartbeat timeout, evicting", w.ID)
 			c.registry.Unregister(w.ID)
 			c.dispatcher.RequeueWorkerJobs(w.ID)
@@ -227,7 +233,7 @@ func (c *Coordinator) sendHeartbeats() {
 			continue
 		}
 
-		if err := w.Conn.WriteMessage(websocket.TextMessage, ping); err != nil {
+		if err := w.WriteMessage(websocket.TextMessage, ping); err != nil {
 			log.Printf("ping to %s failed: %v", w.ID, err)
 		}
 	}
