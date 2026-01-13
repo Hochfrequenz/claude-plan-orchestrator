@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -531,6 +533,10 @@ func runBuildPoolStart(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Set up signal handling for graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
 	// Create registry
 	registry := buildpool.NewRegistry()
 
@@ -564,13 +570,28 @@ func runBuildPoolStart(cmd *cobra.Command, args []string) error {
 	if err := gitDaemon.Start(ctx); err != nil {
 		return fmt.Errorf("starting git daemon: %w", err)
 	}
+	defer gitDaemon.Stop()
 
 	fmt.Printf("Build pool coordinator starting...\n")
 	fmt.Printf("  WebSocket: :%d\n", cfg.BuildPool.WebSocketPort)
 	fmt.Printf("  Git daemon: :%d\n", cfg.BuildPool.GitDaemonPort)
 
-	// Start coordinator (blocks)
-	return coord.Start(ctx)
+	// Run coordinator in goroutine
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- coord.Start(ctx)
+	}()
+
+	// Wait for signal or error
+	select {
+	case sig := <-sigCh:
+		fmt.Printf("\nReceived %v, shutting down...\n", sig)
+		cancel()
+		coord.Stop()
+		return nil
+	case err := <-errCh:
+		return err
+	}
 }
 
 func runBuildPoolStatus(cmd *cobra.Command, args []string) error {
