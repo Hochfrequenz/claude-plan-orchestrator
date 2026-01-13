@@ -402,9 +402,15 @@ go build -o build-agent ./cmd/build-agent
 # Run with flags
 ./build-agent --server ws://coordinator:8081/ws --id worker-1 --jobs 4
 
-# Or with config file
-./build-agent --config /etc/build-agent/config.toml
+# Or just run - config is auto-discovered from default locations
+./build-agent
 ```
+
+The agent automatically looks for config files in these locations (in order):
+1. `/etc/build-agent/config.toml`
+2. `/etc/build-agent.toml`
+
+You can also specify a custom path with `--config /path/to/config.toml`.
 
 Agent config file (`/etc/build-agent/config.toml`):
 

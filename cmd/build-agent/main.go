@@ -51,18 +51,37 @@ type Config struct {
 	} `toml:"storage"`
 }
 
+// Default config file locations (checked in order)
+var defaultConfigPaths = []string{
+	"/etc/build-agent/config.toml",
+	"/etc/build-agent.toml",
+}
+
 func run(cmd *cobra.Command, args []string) error {
 	var cfg Config
 
-	// Load config file if specified
-	if configPath != "" {
-		data, err := os.ReadFile(configPath)
+	// Determine config file path
+	cfgPath := configPath
+	if cfgPath == "" {
+		// Try default locations
+		for _, p := range defaultConfigPaths {
+			if _, err := os.Stat(p); err == nil {
+				cfgPath = p
+				break
+			}
+		}
+	}
+
+	// Load config file if found
+	if cfgPath != "" {
+		data, err := os.ReadFile(cfgPath)
 		if err != nil {
-			return fmt.Errorf("reading config: %w", err)
+			return fmt.Errorf("reading config %s: %w", cfgPath, err)
 		}
 		if err := toml.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("parsing config: %w", err)
+			return fmt.Errorf("parsing config %s: %w", cfgPath, err)
 		}
+		fmt.Printf("Loaded config from %s\n", cfgPath)
 	}
 
 	// CLI flags override config (only if explicitly set)
