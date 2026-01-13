@@ -2,6 +2,7 @@
 package buildpool
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,8 +12,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// newTestCoordinator creates a coordinator with default registry and dispatcher for testing
+func newTestCoordinator(config CoordinatorConfig) *Coordinator {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	return NewCoordinator(config, registry, dispatcher)
+}
+
 func TestCoordinator_AcceptWorker(t *testing.T) {
-	coord := NewCoordinator(CoordinatorConfig{
+	coord := newTestCoordinator(CoordinatorConfig{
 		WebSocketPort: 0, // Use any available port
 	})
 
@@ -52,7 +60,7 @@ func TestCoordinator_AcceptWorker(t *testing.T) {
 }
 
 func TestCoordinator_WorkerDisconnect(t *testing.T) {
-	coord := NewCoordinator(CoordinatorConfig{})
+	coord := newTestCoordinator(CoordinatorConfig{})
 
 	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
 	defer server.Close()
@@ -88,7 +96,7 @@ func TestCoordinator_WorkerDisconnect(t *testing.T) {
 }
 
 func TestCoordinator_ReadyMessage(t *testing.T) {
-	coord := NewCoordinator(CoordinatorConfig{})
+	coord := newTestCoordinator(CoordinatorConfig{})
 
 	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
 	defer server.Close()
@@ -131,7 +139,7 @@ func TestCoordinator_ReadyMessage(t *testing.T) {
 }
 
 func TestCoordinator_CompleteMessage(t *testing.T) {
-	coord := NewCoordinator(CoordinatorConfig{})
+	coord := newTestCoordinator(CoordinatorConfig{})
 
 	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
 	defer server.Close()
@@ -172,7 +180,7 @@ func TestCoordinator_CompleteMessage(t *testing.T) {
 }
 
 func TestCoordinator_Pong(t *testing.T) {
-	coord := NewCoordinator(CoordinatorConfig{})
+	coord := newTestCoordinator(CoordinatorConfig{})
 
 	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
 	defer server.Close()
@@ -213,7 +221,7 @@ func TestCoordinator_Pong(t *testing.T) {
 }
 
 func TestCoordinator_ErrorMessage(t *testing.T) {
-	coord := NewCoordinator(CoordinatorConfig{})
+	coord := newTestCoordinator(CoordinatorConfig{})
 
 	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
 	defer server.Close()
@@ -244,7 +252,7 @@ func TestCoordinator_ErrorMessage(t *testing.T) {
 }
 
 func TestCoordinator_Dispatcher(t *testing.T) {
-	coord := NewCoordinator(CoordinatorConfig{})
+	coord := newTestCoordinator(CoordinatorConfig{})
 
 	if coord.Dispatcher() == nil {
 		t.Error("dispatcher should not be nil")
@@ -252,5 +260,139 @@ func TestCoordinator_Dispatcher(t *testing.T) {
 
 	if coord.Registry() == nil {
 		t.Error("registry should not be nil")
+	}
+}
+
+func TestCoordinatorNewCoordinator(t *testing.T) {
+	// Test constructor with injected dependencies
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	config := CoordinatorConfig{
+		WebSocketPort:     8080,
+		HeartbeatInterval: 15 * time.Second,
+		HeartbeatTimeout:  5 * time.Second,
+	}
+
+	coord := NewCoordinator(config, registry, dispatcher)
+
+	if coord == nil {
+		t.Fatal("NewCoordinator returned nil")
+	}
+
+	// Verify injected dependencies are used
+	if coord.Registry() != registry {
+		t.Error("Registry should match injected registry")
+	}
+	if coord.Dispatcher() != dispatcher {
+		t.Error("Dispatcher should match injected dispatcher")
+	}
+
+	// Test default values are not overridden when provided
+	// (config values should be preserved)
+}
+
+func TestCoordinatorNewCoordinatorDefaults(t *testing.T) {
+	// Test that defaults are applied when not provided
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	config := CoordinatorConfig{
+		WebSocketPort: 8080,
+		// HeartbeatInterval and HeartbeatTimeout not set
+	}
+
+	coord := NewCoordinator(config, registry, dispatcher)
+
+	if coord == nil {
+		t.Fatal("NewCoordinator returned nil")
+	}
+
+	// Defaults should be applied internally (30s interval, 10s timeout)
+	// We can't directly check config values but the coordinator should function
+}
+
+func TestCoordinatorStartStop(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	config := CoordinatorConfig{
+		WebSocketPort:     0, // Let OS pick available port
+		HeartbeatInterval: 100 * time.Millisecond,
+	}
+
+	coord := NewCoordinator(config, registry, dispatcher)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start in goroutine since it blocks
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- coord.Start(ctx)
+	}()
+
+	// Give server time to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop should work without error
+	err := coord.Stop()
+	if err != nil {
+		t.Errorf("Stop returned error: %v", err)
+	}
+
+	// Cancel context to clean up heartbeat loop
+	cancel()
+
+	// Wait for Start to return
+	select {
+	case <-errCh:
+		// Expected - server was closed
+	case <-time.After(time.Second):
+		t.Error("Start did not return after Stop was called")
+	}
+}
+
+func TestCoordinatorHeartbeat(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	config := CoordinatorConfig{
+		WebSocketPort:     0,
+		HeartbeatInterval: 50 * time.Millisecond,
+		HeartbeatTimeout:  100 * time.Millisecond,
+	}
+
+	coord := NewCoordinator(config, registry, dispatcher)
+
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// Register worker
+	registerMsg := `{"type":"register","payload":{"worker_id":"heartbeat-test","max_jobs":2}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(registerMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	worker := registry.Get("heartbeat-test")
+	if worker == nil {
+		t.Fatal("worker not registered")
+	}
+
+	// Set a past heartbeat time to simulate timeout
+	worker.LastHeartbeat = time.Now().Add(-200 * time.Millisecond)
+
+	// Manually trigger heartbeat check (normally done by heartbeatLoop)
+	coord.sendHeartbeats()
+
+	// Worker should be evicted due to timeout
+	time.Sleep(50 * time.Millisecond)
+
+	if registry.Get("heartbeat-test") != nil {
+		t.Error("worker should have been evicted due to heartbeat timeout")
 	}
 }

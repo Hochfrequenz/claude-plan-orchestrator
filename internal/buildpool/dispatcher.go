@@ -126,3 +126,16 @@ func (d *Dispatcher) PendingCount() int {
 	defer d.mu.Unlock()
 	return len(d.pending)
 }
+
+// RequeueWorkerJobs requeues all in-progress jobs assigned to a worker
+func (d *Dispatcher) RequeueWorkerJobs(workerID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for _, pj := range d.pending {
+		if pj.WorkerID == workerID {
+			pj.WorkerID = ""
+			d.queue = append(d.queue, pj)
+		}
+	}
+}

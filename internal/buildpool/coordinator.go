@@ -34,7 +34,7 @@ type Coordinator struct {
 }
 
 // NewCoordinator creates a new coordinator
-func NewCoordinator(config CoordinatorConfig) *Coordinator {
+func NewCoordinator(config CoordinatorConfig, registry *Registry, dispatcher *Dispatcher) *Coordinator {
 	if config.HeartbeatInterval == 0 {
 		config.HeartbeatInterval = 30 * time.Second
 	}
@@ -42,17 +42,15 @@ func NewCoordinator(config CoordinatorConfig) *Coordinator {
 		config.HeartbeatTimeout = 10 * time.Second
 	}
 
-	registry := NewRegistry()
-
 	c := &Coordinator{
-		config:   config,
-		registry: registry,
+		config:     config,
+		registry:   registry,
+		dispatcher: dispatcher,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 
-	c.dispatcher = NewDispatcher(registry, nil)
 	c.dispatcher.SetSendFunc(c.sendJobToWorker)
 
 	return c
@@ -86,6 +84,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 		conn.Close()
 		if workerID != "" {
 			c.registry.Unregister(workerID)
+			c.dispatcher.RequeueWorkerJobs(workerID)
 			log.Printf("worker %s disconnected", workerID)
 		}
 	}()
@@ -156,7 +155,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 			}
 			c.dispatcher.Complete(errMsg.JobID, &buildprotocol.JobResult{
 				JobID:    errMsg.JobID,
-				ExitCode: 1,
+				ExitCode: -1,
 				Output:   "Error: " + errMsg.Message,
 			})
 
@@ -219,6 +218,15 @@ func (c *Coordinator) sendHeartbeats() {
 	ping, _ := buildprotocol.MarshalEnvelope(buildprotocol.TypePing, nil)
 
 	for _, w := range c.registry.All() {
+		// Check for heartbeat timeout
+		if !w.LastHeartbeat.IsZero() && time.Since(w.LastHeartbeat) > c.config.HeartbeatTimeout {
+			log.Printf("worker %s heartbeat timeout, evicting", w.ID)
+			c.registry.Unregister(w.ID)
+			c.dispatcher.RequeueWorkerJobs(w.ID)
+			w.Conn.Close()
+			continue
+		}
+
 		if err := w.Conn.WriteMessage(websocket.TextMessage, ping); err != nil {
 			log.Printf("ping to %s failed: %v", w.ID, err)
 		}
