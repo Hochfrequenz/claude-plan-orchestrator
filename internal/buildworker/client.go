@@ -98,7 +98,10 @@ func (w *Worker) Connect() error {
 	if err != nil {
 		return fmt.Errorf("dial failed: %w", err)
 	}
+
+	w.mu.Lock()
 	w.conn = conn
+	w.mu.Unlock()
 
 	// Send register message
 	return w.send(buildprotocol.TypeRegister, buildprotocol.RegisterMessage{
@@ -233,9 +236,12 @@ func (w *Worker) send(msgType string, payload interface{}) error {
 // Stop gracefully shuts down the worker
 func (w *Worker) Stop() {
 	w.cancel()
+	w.mu.Lock()
 	if w.conn != nil {
 		w.conn.Close()
+		w.conn = nil
 	}
+	w.mu.Unlock()
 }
 
 // RunWithReconnect runs the worker with automatic reconnection
@@ -270,6 +276,15 @@ func (w *Worker) RunWithReconnect() error {
 
 		// Run until disconnected
 		err = w.Run()
+
+		// Close the connection before reconnecting to avoid leaking file descriptors
+		w.mu.Lock()
+		if w.conn != nil {
+			w.conn.Close()
+			w.conn = nil
+		}
+		w.mu.Unlock()
+
 		if err != nil {
 			log.Printf("disconnected: %v", err)
 		}
