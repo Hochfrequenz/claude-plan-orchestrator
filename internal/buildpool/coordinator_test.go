@@ -362,14 +362,34 @@ func TestCoordinator_OutputAccumulation(t *testing.T) {
 	coord.AccumulateOutput(jobID, "stdout", "line 2\n")
 
 	output := coord.GetAndClearOutput(jobID)
-	if output != "line 1\nerror 1\nline 2\n" {
-		t.Errorf("output = %q, want accumulated output", output)
+	// With separate stream accumulation, GetAndClearOutput returns stdout + stderr
+	if output != "line 1\nline 2\nerror 1\n" {
+		t.Errorf("output = %q, want stdout then stderr", output)
 	}
 
 	// Verify cleared
 	output = coord.GetAndClearOutput(jobID)
 	if output != "" {
 		t.Errorf("output after clear = %q, want empty", output)
+	}
+}
+
+func TestCoordinator_SeparateStreamAccumulation(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	jobID := "test-job-sep"
+	coord.AccumulateOutput(jobID, "stdout", "stdout line 1\n")
+	coord.AccumulateOutput(jobID, "stderr", "stderr line 1\n")
+	coord.AccumulateOutput(jobID, "stdout", "stdout line 2\n")
+
+	stdout, stderr := coord.GetSeparateOutput(jobID)
+	if stdout != "stdout line 1\nstdout line 2\n" {
+		t.Errorf("stdout = %q, want stdout lines only", stdout)
+	}
+	if stderr != "stderr line 1\n" {
+		t.Errorf("stderr = %q, want stderr lines only", stderr)
 	}
 }
 

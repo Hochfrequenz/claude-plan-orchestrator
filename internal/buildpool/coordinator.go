@@ -36,7 +36,13 @@ type Coordinator struct {
 
 	// Output accumulator for streaming output from workers
 	outputMu     sync.Mutex
-	outputBuffer map[string]*strings.Builder
+	outputBuffer map[string]*jobOutput
+}
+
+// jobOutput holds separate stdout and stderr buffers
+type jobOutput struct {
+	stdout strings.Builder
+	stderr strings.Builder
 }
 
 // NewCoordinator creates a new coordinator
@@ -55,7 +61,7 @@ func NewCoordinator(config CoordinatorConfig, registry *Registry, dispatcher *Di
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		outputBuffer: make(map[string]*strings.Builder),
+		outputBuffer: make(map[string]*jobOutput),
 	}
 
 	c.dispatcher.SetSendFunc(c.sendJobToWorker)
@@ -385,26 +391,43 @@ func (c *Coordinator) sendHeartbeats() {
 	}
 }
 
-// AccumulateOutput appends output for a job
+// AccumulateOutput appends output for a job, tracking streams separately
 func (c *Coordinator) AccumulateOutput(jobID, stream, data string) {
 	c.outputMu.Lock()
 	defer c.outputMu.Unlock()
 
 	if c.outputBuffer[jobID] == nil {
-		c.outputBuffer[jobID] = &strings.Builder{}
+		c.outputBuffer[jobID] = &jobOutput{}
 	}
-	c.outputBuffer[jobID].WriteString(data)
+	if stream == "stderr" {
+		c.outputBuffer[jobID].stderr.WriteString(data)
+	} else {
+		c.outputBuffer[jobID].stdout.WriteString(data)
+	}
 }
 
-// GetAndClearOutput returns accumulated output and clears the buffer
+// GetAndClearOutput returns accumulated output and clears the buffer (backwards compat)
 func (c *Coordinator) GetAndClearOutput(jobID string) string {
 	c.outputMu.Lock()
 	defer c.outputMu.Unlock()
 
 	if buf, ok := c.outputBuffer[jobID]; ok {
-		output := buf.String()
+		output := buf.stdout.String() + buf.stderr.String()
 		delete(c.outputBuffer, jobID)
 		return output
 	}
 	return ""
+}
+
+// GetSeparateOutput returns stdout and stderr separately and clears the buffer
+func (c *Coordinator) GetSeparateOutput(jobID string) (stdout, stderr string) {
+	c.outputMu.Lock()
+	defer c.outputMu.Unlock()
+
+	if buf, ok := c.outputBuffer[jobID]; ok {
+		stdout = buf.stdout.String()
+		stderr = buf.stderr.String()
+		delete(c.outputBuffer, jobID)
+	}
+	return
 }
