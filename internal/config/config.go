@@ -125,6 +125,7 @@ func Load(path string) (*Config, error) {
 	cfg.General.ProjectRoot = ExpandPath(cfg.General.ProjectRoot)
 	cfg.General.WorktreeDir = ExpandPath(cfg.General.WorktreeDir)
 	cfg.General.DatabasePath = ExpandPath(cfg.General.DatabasePath)
+	cfg.BuildPool.LocalFallback.WorktreeDir = ExpandPath(cfg.BuildPool.LocalFallback.WorktreeDir)
 
 	return cfg, nil
 }
