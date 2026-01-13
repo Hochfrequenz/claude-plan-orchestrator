@@ -144,7 +144,7 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 				log.Printf("failed to unmarshal %s message: %v", env.Type, err)
 				continue
 			}
-			// TODO: forward to MCP result stream
+			c.AccumulateOutput(output.JobID, output.Stream, output.Data)
 
 		case buildprotocol.TypeComplete:
 			var complete buildprotocol.CompleteMessage
@@ -152,9 +152,11 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 				log.Printf("failed to unmarshal %s message: %v", env.Type, err)
 				continue
 			}
+			output := c.GetAndClearOutput(complete.JobID)
 			c.dispatcher.Complete(complete.JobID, &buildprotocol.JobResult{
 				JobID:        complete.JobID,
 				ExitCode:     complete.ExitCode,
+				Output:       output,
 				DurationSecs: float64(complete.DurationMs) / 1000,
 			})
 
