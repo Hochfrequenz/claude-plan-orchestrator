@@ -3,13 +3,14 @@ package buildpool
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
 func TestMCPServer_ToolsList(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	tools := server.ListTools()
 
@@ -34,7 +35,7 @@ func TestMCPServer_ToolsList(t *testing.T) {
 func TestMCPServer_BuildCommandArgs(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -76,7 +77,7 @@ func TestMCPServer_BuildCommandArgs(t *testing.T) {
 func TestMCPServer_ClippyCommandArgs(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -108,7 +109,7 @@ func TestMCPServer_ClippyCommandArgs(t *testing.T) {
 func TestMCPServer_TestCommandArgs(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -155,7 +156,7 @@ func TestMCPServer_TestCommandArgs(t *testing.T) {
 func TestMCPServer_HandleRequest_Initialize(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	req := map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -195,7 +196,7 @@ func TestMCPServer_HandleRequest_Initialize(t *testing.T) {
 func TestMCPServer_HandleRequest_ToolsList(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	req := map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -227,7 +228,7 @@ func TestMCPServer_HandleRequest_ToolsList(t *testing.T) {
 func TestMCPServer_HandleRequest_UnknownMethod(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	req := map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -250,7 +251,7 @@ func TestMCPServer_HandleRequest_UnknownMethod(t *testing.T) {
 func TestMCPServer_WorkerStatus(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	result, err := server.workerStatus()
 	if err != nil {
@@ -275,7 +276,7 @@ func TestMCPServer_WorkerStatus(t *testing.T) {
 func TestMCPServer_CallTool_NoDispatcher(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	_, err := server.CallTool("build", nil)
 	if err == nil {
@@ -290,7 +291,7 @@ func TestMCPServer_CallTool_NoDispatcher(t *testing.T) {
 func TestMCPServer_CallTool_UnknownTool(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	_, err := server.CallTool("unknown_tool", nil)
 	if err == nil {
@@ -305,7 +306,7 @@ func TestMCPServer_CallTool_UnknownTool(t *testing.T) {
 func TestMCPServer_CallTool_RunCommandMissingArg(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	// Test with nil args
 	_, err := server.CallTool("run_command", nil)
@@ -338,7 +339,7 @@ func TestMCPServer_CallTool_RunCommandMissingArg(t *testing.T) {
 func TestMCPServer_BuildCommand_InvalidFeatures(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	// Test with non-string feature elements - should not panic
 	args := map[string]interface{}{
@@ -363,7 +364,7 @@ func TestMCPServer_BuildCommand_InvalidFeatures(t *testing.T) {
 func TestMCPServer_ToolSchema(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
-	}, nil)
+	}, nil, nil)
 
 	tools := server.ListTools()
 
@@ -381,5 +382,31 @@ func TestMCPServer_ToolSchema(t *testing.T) {
 		if tool.InputSchema["type"] != "object" {
 			t.Errorf("tool %s schema type should be object", tool.Name)
 		}
+	}
+}
+
+func TestMCPServer_WorkerStatus_ReturnsRealData(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+
+	// Register a worker
+	registry.Register(&ConnectedWorker{
+		ID:      "worker-1",
+		MaxJobs: 4,
+		Slots:   3,
+	})
+
+	server := NewMCPServer(MCPServerConfig{WorktreePath: "."}, dispatcher, registry)
+
+	result, err := server.CallTool("worker_status", nil)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	if !strings.Contains(result.Output, "worker-1") {
+		t.Errorf("output missing worker-1: %s", result.Output)
+	}
+	if !strings.Contains(result.Output, `"max_jobs": 4`) {
+		t.Errorf("output missing max_jobs: %s", result.Output)
 	}
 }

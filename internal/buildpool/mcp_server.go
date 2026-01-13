@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildprotocol"
 )
@@ -24,6 +25,7 @@ type MCPServerConfig struct {
 type MCPServer struct {
 	config     MCPServerConfig
 	dispatcher *Dispatcher
+	registry   *Registry
 	repoURL    string
 	commit     string
 }
@@ -36,10 +38,11 @@ type MCPTool struct {
 }
 
 // NewMCPServer creates a new MCP server
-func NewMCPServer(config MCPServerConfig, dispatcher *Dispatcher) *MCPServer {
+func NewMCPServer(config MCPServerConfig, dispatcher *Dispatcher, registry *Registry) *MCPServer {
 	s := &MCPServer{
 		config:     config,
 		dispatcher: dispatcher,
+		registry:   registry,
 	}
 
 	// Get repo URL and commit from worktree
@@ -259,12 +262,32 @@ func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildpr
 }
 
 func (s *MCPServer) workerStatus() (*buildprotocol.JobResult, error) {
-	// This would query the coordinator's registry
-	// For now, return a placeholder
+	workers := []map[string]interface{}{}
+
+	if s.registry != nil {
+		for _, w := range s.registry.All() {
+			w.mu.Lock()
+			activeJobs := w.MaxJobs - w.Slots
+			w.mu.Unlock()
+
+			workers = append(workers, map[string]interface{}{
+				"id":              w.ID,
+				"max_jobs":        w.MaxJobs,
+				"active_jobs":     activeJobs,
+				"connected_since": w.ConnectedAt.Format(time.RFC3339),
+			})
+		}
+	}
+
+	queuedJobs := 0
+	if s.dispatcher != nil {
+		queuedJobs = s.dispatcher.QueueLength()
+	}
+
 	status := map[string]interface{}{
-		"workers":               []interface{}{},
-		"queued_jobs":           0,
-		"local_fallback_active": true,
+		"workers":               workers,
+		"queued_jobs":           queuedJobs,
+		"local_fallback_active": s.registry == nil || s.registry.Count() == 0,
 	}
 
 	output, _ := json.MarshalIndent(status, "", "  ")
