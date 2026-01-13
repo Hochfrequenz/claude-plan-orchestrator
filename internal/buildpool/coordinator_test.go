@@ -3,6 +3,7 @@ package buildpool
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -390,6 +391,74 @@ func TestCoordinator_SeparateStreamAccumulation(t *testing.T) {
 	}
 	if stderr != "stderr line 1\n" {
 		t.Errorf("stderr = %q, want stderr lines only", stderr)
+	}
+}
+
+func TestCoordinator_LogRetention(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Complete a job (simulates output being moved to retention)
+	coord.AccumulateOutput("job-1", "stdout", "stdout content")
+	coord.AccumulateOutput("job-1", "stderr", "stderr content")
+	coord.RetainLogs("job-1")
+
+	// Should be able to retrieve logs
+	stdout, stderr, found := coord.GetRetainedLogs("job-1")
+	if !found {
+		t.Fatal("expected to find retained logs")
+	}
+	if stdout != "stdout content" {
+		t.Errorf("stdout = %q, want %q", stdout, "stdout content")
+	}
+	if stderr != "stderr content" {
+		t.Errorf("stderr = %q, want %q", stderr, "stderr content")
+	}
+
+	// Should still be available (doesn't clear on read)
+	_, _, found = coord.GetRetainedLogs("job-1")
+	if !found {
+		t.Error("retained logs should persist across reads")
+	}
+}
+
+func TestCoordinator_LogRetentionEviction(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Fill buffer with 50 jobs
+	for i := 0; i < 50; i++ {
+		jobID := fmt.Sprintf("job-%d", i)
+		coord.AccumulateOutput(jobID, "stdout", fmt.Sprintf("stdout-%d", i))
+		coord.RetainLogs(jobID)
+	}
+
+	// job-0 should still be present
+	_, _, found := coord.GetRetainedLogs("job-0")
+	if !found {
+		t.Error("job-0 should still be retained")
+	}
+
+	// Add one more job - should evict job-0
+	coord.AccumulateOutput("job-50", "stdout", "stdout-50")
+	coord.RetainLogs("job-50")
+
+	// job-0 should be evicted
+	_, _, found = coord.GetRetainedLogs("job-0")
+	if found {
+		t.Error("job-0 should have been evicted")
+	}
+
+	// job-1 and job-50 should be present
+	_, _, found = coord.GetRetainedLogs("job-1")
+	if !found {
+		t.Error("job-1 should still be retained")
+	}
+	_, _, found = coord.GetRetainedLogs("job-50")
+	if !found {
+		t.Error("job-50 should be retained")
 	}
 }
 

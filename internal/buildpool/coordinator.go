@@ -37,12 +37,24 @@ type Coordinator struct {
 	// Output accumulator for streaming output from workers
 	outputMu     sync.Mutex
 	outputBuffer map[string]*jobOutput
+
+	// Log retention ring buffer for completed jobs
+	retainedLogs [50]*completedLog
+	retainIndex  int
+	retainByID   map[string]*completedLog
 }
 
 // jobOutput holds separate stdout and stderr buffers
 type jobOutput struct {
 	stdout strings.Builder
 	stderr strings.Builder
+}
+
+// completedLog holds logs for a completed job
+type completedLog struct {
+	jobID  string
+	stdout string
+	stderr string
 }
 
 // NewCoordinator creates a new coordinator
@@ -62,6 +74,7 @@ func NewCoordinator(config CoordinatorConfig, registry *Registry, dispatcher *Di
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 		outputBuffer: make(map[string]*jobOutput),
+		retainByID:   make(map[string]*completedLog),
 	}
 
 	c.dispatcher.SetSendFunc(c.sendJobToWorker)
@@ -430,4 +443,44 @@ func (c *Coordinator) GetSeparateOutput(jobID string) (stdout, stderr string) {
 		delete(c.outputBuffer, jobID)
 	}
 	return
+}
+
+// RetainLogs moves logs from active buffer to retention ring buffer
+func (c *Coordinator) RetainLogs(jobID string) {
+	c.outputMu.Lock()
+	defer c.outputMu.Unlock()
+
+	buf, ok := c.outputBuffer[jobID]
+	if !ok {
+		return
+	}
+
+	// Evict old entry at this index if present
+	if old := c.retainedLogs[c.retainIndex]; old != nil {
+		delete(c.retainByID, old.jobID)
+	}
+
+	// Store new entry
+	entry := &completedLog{
+		jobID:  jobID,
+		stdout: buf.stdout.String(),
+		stderr: buf.stderr.String(),
+	}
+	c.retainedLogs[c.retainIndex] = entry
+	c.retainByID[jobID] = entry
+	c.retainIndex = (c.retainIndex + 1) % 50
+
+	// Clear from active buffer
+	delete(c.outputBuffer, jobID)
+}
+
+// GetRetainedLogs retrieves logs from retention buffer
+func (c *Coordinator) GetRetainedLogs(jobID string) (stdout, stderr string, found bool) {
+	c.outputMu.Lock()
+	defer c.outputMu.Unlock()
+
+	if entry, ok := c.retainByID[jobID]; ok {
+		return entry.stdout, entry.stderr, true
+	}
+	return "", "", false
 }
