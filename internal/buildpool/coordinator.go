@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,10 @@ type Coordinator struct {
 
 	server *http.Server
 	mu     sync.Mutex
+
+	// Output accumulator for streaming output from workers
+	outputMu     sync.Mutex
+	outputBuffer map[string]*strings.Builder
 }
 
 // NewCoordinator creates a new coordinator
@@ -49,6 +54,7 @@ func NewCoordinator(config CoordinatorConfig, registry *Registry, dispatcher *Di
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
+		outputBuffer: make(map[string]*strings.Builder),
 	}
 
 	c.dispatcher.SetSendFunc(c.sendJobToWorker)
@@ -237,4 +243,28 @@ func (c *Coordinator) sendHeartbeats() {
 			log.Printf("ping to %s failed: %v", w.ID, err)
 		}
 	}
+}
+
+// AccumulateOutput appends output for a job
+func (c *Coordinator) AccumulateOutput(jobID, stream, data string) {
+	c.outputMu.Lock()
+	defer c.outputMu.Unlock()
+
+	if c.outputBuffer[jobID] == nil {
+		c.outputBuffer[jobID] = &strings.Builder{}
+	}
+	c.outputBuffer[jobID].WriteString(data)
+}
+
+// GetAndClearOutput returns accumulated output and clears the buffer
+func (c *Coordinator) GetAndClearOutput(jobID string) string {
+	c.outputMu.Lock()
+	defer c.outputMu.Unlock()
+
+	if buf, ok := c.outputBuffer[jobID]; ok {
+		output := buf.String()
+		delete(c.outputBuffer, jobID)
+		return output
+	}
+	return ""
 }

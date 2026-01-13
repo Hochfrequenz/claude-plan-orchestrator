@@ -350,6 +350,29 @@ func TestCoordinatorStartStop(t *testing.T) {
 	}
 }
 
+func TestCoordinator_OutputAccumulation(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Simulate output accumulation
+	jobID := "test-job-123"
+	coord.AccumulateOutput(jobID, "stdout", "line 1\n")
+	coord.AccumulateOutput(jobID, "stderr", "error 1\n")
+	coord.AccumulateOutput(jobID, "stdout", "line 2\n")
+
+	output := coord.GetAndClearOutput(jobID)
+	if output != "line 1\nerror 1\nline 2\n" {
+		t.Errorf("output = %q, want accumulated output", output)
+	}
+
+	// Verify cleared
+	output = coord.GetAndClearOutput(jobID)
+	if output != "" {
+		t.Errorf("output after clear = %q, want empty", output)
+	}
+}
+
 func TestCoordinatorHeartbeat(t *testing.T) {
 	registry := NewRegistry()
 	dispatcher := NewDispatcher(registry, nil)
