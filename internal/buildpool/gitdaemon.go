@@ -41,7 +41,7 @@ func (d *GitDaemon) Args() []string {
 		"daemon",
 		"--reuseaddr",
 		fmt.Sprintf("--port=%d", d.config.Port),
-		"--base-path", d.config.BaseDir,
+		fmt.Sprintf("--base-path=%s", d.config.BaseDir),
 		"--export-all",
 		"--verbose",
 	}

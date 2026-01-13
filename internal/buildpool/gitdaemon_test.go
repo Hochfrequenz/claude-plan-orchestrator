@@ -3,6 +3,8 @@ package buildpool
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,11 +38,12 @@ func TestGitDaemon_Config(t *testing.T) {
 	// Check expected arguments
 	hasPort := false
 	hasBaseDir := false
-	for i, arg := range args {
+	expectedBasePath := "--base-path=" + repoDir
+	for _, arg := range args {
 		if arg == "--port=9418" {
 			hasPort = true
 		}
-		if arg == "--base-path" && i+1 < len(args) && args[i+1] == repoDir {
+		if arg == expectedBasePath {
 			hasBaseDir = true
 		}
 	}
@@ -85,7 +88,7 @@ func TestGitDaemon_Args(t *testing.T) {
 		"daemon",
 		"--reuseaddr",
 		"--port=9999",
-		"--base-path", "/test/repo",
+		"--base-path=/test/repo",
 		"--export-all",
 		"--verbose",
 		"/test/repo",
@@ -141,6 +144,48 @@ func TestGitDaemon_StartStop(t *testing.T) {
 	if err := daemon.Stop(); err != nil {
 		t.Errorf("Stop failed: %v", err)
 	}
+}
+
+func TestGitDaemon_ActuallyListens(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoDir := t.TempDir()
+
+	// Initialize git repo
+	cmd := exec.Command("git", "init")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+
+	// Use a unique high port to avoid conflicts
+	port := 29418
+	daemon := NewGitDaemon(GitDaemonConfig{
+		Port:    port,
+		BaseDir: repoDir,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer daemon.Stop()
+
+	// Start daemon
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Give daemon time to bind to port
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify port is actually listening by attempting a TCP connection
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
+	if err != nil {
+		t.Fatalf("daemon not listening on port %d: %v", port, err)
+	}
+	conn.Close()
 }
 
 func TestGitDaemon_ListenAddr(t *testing.T) {
