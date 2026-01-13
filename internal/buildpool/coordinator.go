@@ -97,6 +97,13 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 		}
 	}()
 
+	// Set up WebSocket-level pong handler to extend read deadline
+	conn.SetReadDeadline(time.Now().Add(c.config.HeartbeatTimeout))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(c.config.HeartbeatTimeout))
+		return nil
+	})
+
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -105,6 +112,9 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 			}
 			return
 		}
+
+		// Extend read deadline on any message received
+		conn.SetReadDeadline(time.Now().Add(c.config.HeartbeatTimeout))
 
 		var env buildprotocol.EnvelopeRaw
 		if err := json.Unmarshal(message, &env); err != nil {
@@ -340,21 +350,19 @@ func (c *Coordinator) heartbeatLoop(ctx context.Context) {
 }
 
 func (c *Coordinator) sendHeartbeats() {
-	ping, _ := buildprotocol.MarshalEnvelope(buildprotocol.TypePing, nil)
-
 	for _, w := range c.registry.All() {
-		// Check for heartbeat timeout
-		lastHeartbeat := w.GetLastHeartbeat()
-		if !lastHeartbeat.IsZero() && time.Since(lastHeartbeat) > c.config.HeartbeatTimeout {
-			log.Printf("worker %s heartbeat timeout, evicting", w.ID)
-			c.registry.Unregister(w.ID)
-			c.dispatcher.RequeueWorkerJobs(w.ID)
-			w.Conn.Close()
-			continue
-		}
+		// Send WebSocket protocol-level ping (not application-level)
+		// This triggers the pong handler on the worker side, keeping the connection alive
+		w.writeMu.Lock()
+		w.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		err := w.Conn.WriteMessage(websocket.PingMessage, nil)
+		w.Conn.SetWriteDeadline(time.Time{}) // Clear deadline
+		w.writeMu.Unlock()
 
-		if err := w.WriteMessage(websocket.TextMessage, ping); err != nil {
+		if err != nil {
 			log.Printf("ping to %s failed: %v", w.ID, err)
+			// Connection is broken, close it (the read loop will handle cleanup)
+			w.Conn.Close()
 		}
 	}
 }

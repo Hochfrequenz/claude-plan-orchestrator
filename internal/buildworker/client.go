@@ -92,12 +92,22 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 	}, nil
 }
 
+// pongWait is how long we wait for a pong response before timing out
+const pongWait = 90 * time.Second
+
 // Connect establishes connection to the coordinator
 func (w *Worker) Connect() error {
 	conn, _, err := websocket.DefaultDialer.Dial(w.config.ServerURL, nil)
 	if err != nil {
 		return fmt.Errorf("dial failed: %w", err)
 	}
+
+	// Set up WebSocket-level pong handler to extend read deadline
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 
 	w.mu.Lock()
 	w.conn = conn
@@ -129,6 +139,9 @@ func (w *Worker) Run() error {
 			return fmt.Errorf("read failed: %w", err)
 		}
 
+		// Extend read deadline on any message received
+		w.conn.SetReadDeadline(time.Now().Add(pongWait))
+
 		var env buildprotocol.EnvelopeRaw
 		if err := json.Unmarshal(message, &env); err != nil {
 			log.Printf("invalid message: %v", err)
@@ -145,6 +158,7 @@ func (w *Worker) Run() error {
 			go w.handleJob(job)
 
 		case buildprotocol.TypePing:
+			// Legacy application-level ping - respond for backwards compatibility
 			w.send(buildprotocol.TypePong, nil)
 
 		case buildprotocol.TypeCancel:
