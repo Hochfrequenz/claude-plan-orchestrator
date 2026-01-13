@@ -143,12 +143,21 @@ func (d *Dispatcher) Cancel(jobID string) error {
 			}
 		}
 		d.queue = remaining
+		// Notify result channel before removing from pending
+		if pj.ResultCh != nil {
+			pj.ResultCh <- &buildprotocol.JobResult{JobID: jobID, ExitCode: -2, Output: "Job cancelled"}
+			close(pj.ResultCh)
+		}
 		delete(d.pending, jobID)
 		d.mu.Unlock()
 		return nil
 	}
 
-	// Job is assigned to a worker - remove from pending first
+	// Job is assigned to a worker - notify result channel and remove from pending
+	if pj.ResultCh != nil {
+		pj.ResultCh <- &buildprotocol.JobResult{JobID: jobID, ExitCode: -2, Output: "Job cancelled"}
+		close(pj.ResultCh)
+	}
 	delete(d.pending, jobID)
 	d.mu.Unlock()
 
