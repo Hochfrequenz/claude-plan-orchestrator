@@ -58,6 +58,7 @@ func NewCoordinator(config CoordinatorConfig, registry *Registry, dispatcher *Di
 	}
 
 	c.dispatcher.SetSendFunc(c.sendJobToWorker)
+	c.dispatcher.SetCancelFunc(c.sendCancelToWorker)
 
 	return c
 }
@@ -183,6 +184,21 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 
 func (c *Coordinator) sendJobToWorker(w *ConnectedWorker, job *buildprotocol.JobMessage) error {
 	data, err := buildprotocol.MarshalEnvelope(buildprotocol.TypeJob, job)
+	if err != nil {
+		return err
+	}
+	return w.WriteMessage(websocket.TextMessage, data)
+}
+
+func (c *Coordinator) sendCancelToWorker(workerID, jobID string) error {
+	w := c.registry.Get(workerID)
+	if w == nil {
+		return fmt.Errorf("worker %s not found", workerID)
+	}
+
+	data, err := buildprotocol.MarshalEnvelope(buildprotocol.TypeCancel, buildprotocol.CancelMessage{
+		JobID: jobID,
+	})
 	if err != nil {
 		return err
 	}
