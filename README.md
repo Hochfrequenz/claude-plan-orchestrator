@@ -27,7 +27,7 @@ claude-orch onboard
 
 ### Option 1: Quick Install (Recommended)
 
-Download a pre-built binary with a single command:
+Download pre-built binaries with a single command. This installs both `claude-orch` (the orchestrator) and `build-mcp` (MCP server for distributed builds):
 
 ```bash
 # Install latest version
@@ -56,11 +56,12 @@ Prerequisites: Go 1.21+
 git clone https://github.com/hochfrequenz/claude-plan-orchestrator.git
 cd claude-plan-orchestrator
 
-# Build the CLI
+# Build both binaries
 go build -o claude-orch ./cmd/claude-orch
+go build -o build-mcp ./cmd/build-mcp
 
-# Install to PATH
-mv claude-orch ~/.local/bin/
+# Install to PATH (keep both in same directory)
+mv claude-orch build-mcp ~/.local/bin/
 ```
 
 ### Prerequisites

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 REPO="hochfrequenz/claude-plan-orchestrator"
-BINARY_NAME="claude-orch"
+BINARIES=("claude-orch" "build-mcp")
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 # Colors
@@ -73,45 +73,52 @@ install() {
         fi
     fi
 
-    info "Installing ${BINARY_NAME} ${version}..."
-
-    # Construct download URL
-    local filename="${BINARY_NAME}_${version#v}_${platform}"
-    [[ "$platform" == *"windows"* ]] && filename="${filename}.exe"
-    local url="https://github.com/${REPO}/releases/download/${version}/${filename}.tar.gz"
+    info "Installing claude-orch and build-mcp ${version}..."
 
     # Create temp directory
     local tmp_dir
     tmp_dir=$(mktemp -d)
     trap "rm -rf $tmp_dir" EXIT
 
-    # Download
-    info "Downloading from ${url}..."
-    if ! curl -fsSL "$url" -o "${tmp_dir}/archive.tar.gz"; then
-        error "Failed to download. Check if version ${version} exists."
-    fi
-
-    # Extract
-    info "Extracting..."
-    tar -xzf "${tmp_dir}/archive.tar.gz" -C "$tmp_dir"
-
-    # Install
+    # Create install directory
     mkdir -p "$INSTALL_DIR"
-    local binary="${tmp_dir}/${BINARY_NAME}"
-    [[ "$platform" == *"windows"* ]] && binary="${binary}.exe"
 
-    if [[ ! -f "$binary" ]]; then
-        # Try finding binary in extracted directory
-        binary=$(find "$tmp_dir" -name "${BINARY_NAME}*" -type f | head -1)
-    fi
+    # Download and install each binary
+    for binary_name in "${BINARIES[@]}"; do
+        # Construct download URL
+        local filename="${binary_name}_${version#v}_${platform}"
+        [[ "$platform" == *"windows"* ]] && filename="${filename}.exe"
+        local url="https://github.com/${REPO}/releases/download/${version}/${filename}.tar.gz"
 
-    mv "$binary" "${INSTALL_DIR}/${BINARY_NAME}"
-    chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+        # Download
+        info "Downloading ${binary_name}..."
+        if ! curl -fsSL "$url" -o "${tmp_dir}/${binary_name}.tar.gz"; then
+            error "Failed to download ${binary_name}. Check if version ${version} exists."
+        fi
 
-    success "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
+        # Extract
+        tar -xzf "${tmp_dir}/${binary_name}.tar.gz" -C "$tmp_dir"
+
+        # Find and install binary
+        local binary="${tmp_dir}/${binary_name}"
+        [[ "$platform" == *"windows"* ]] && binary="${binary}.exe"
+
+        if [[ ! -f "$binary" ]]; then
+            # Try finding binary in extracted directory
+            binary=$(find "$tmp_dir" -name "${binary_name}" -type f | head -1)
+        fi
+
+        if [[ -f "$binary" ]]; then
+            mv "$binary" "${INSTALL_DIR}/${binary_name}"
+            chmod +x "${INSTALL_DIR}/${binary_name}"
+            success "Installed ${binary_name} to ${INSTALL_DIR}/${binary_name}"
+        else
+            warn "Could not find ${binary_name} in archive"
+        fi
+    done
 
     # Check if in PATH
-    if ! command -v "$BINARY_NAME" &> /dev/null; then
+    if ! command -v "claude-orch" &> /dev/null; then
         warn "${INSTALL_DIR} is not in your PATH"
         echo ""
         echo "Add it to your shell profile:"
