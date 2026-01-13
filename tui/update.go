@@ -78,6 +78,13 @@ type WorkersUpdateMsg struct {
 	Status  string // "connected" or "unreachable"
 }
 
+// WorkerTestMsg reports the result of a worker test
+type WorkerTestMsg struct {
+	Success bool
+	Output  string
+	Error   string
+}
+
 // Update handles messages
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -276,6 +283,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusMsg = "Batch resumed"
 				}
 			}
+		case "T":
+			// Test worker connection (only on Dashboard tab when build pool is connected)
+			if m.activeTab == 0 && m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
+				m.statusMsg = "Testing worker..."
+				return m, testWorkerCmd(m.buildPoolURL)
+			} else if m.buildPoolStatus != "connected" {
+				m.statusMsg = "Build pool not connected"
+			}
 		}
 
 	case tea.MouseMsg:
@@ -429,6 +444,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.testOutput = "Error: " + msg.Err.Error()
 		} else {
 			m.testOutput = msg.Output
+		}
+		return m, nil
+
+	case WorkerTestMsg:
+		if msg.Success {
+			m.statusMsg = fmt.Sprintf("Worker test OK: %s", strings.TrimSpace(msg.Output))
+		} else {
+			m.statusMsg = fmt.Sprintf("Worker test failed: %s", msg.Error)
 		}
 		return m, nil
 
@@ -892,5 +915,49 @@ func fetchWorkersCmd(buildPoolURL string) tea.Cmd {
 		}
 
 		return WorkersUpdateMsg{Workers: workers, Status: "connected"}
+	}
+}
+
+// testWorkerCmd sends a test job to verify worker connectivity
+func testWorkerCmd(buildPoolURL string) tea.Cmd {
+	return func() tea.Msg {
+		client := &http.Client{Timeout: 30 * time.Second}
+
+		// Submit a simple echo command
+		jobReq := struct {
+			Command string `json:"command"`
+			Timeout int    `json:"timeout"`
+		}{
+			Command: "echo 'hello from worker'",
+			Timeout: 10,
+		}
+
+		reqBody, _ := json.Marshal(jobReq)
+		resp, err := client.Post(buildPoolURL+"/job", "application/json", strings.NewReader(string(reqBody)))
+		if err != nil {
+			return WorkerTestMsg{Success: false, Error: err.Error()}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return WorkerTestMsg{Success: false, Error: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+		}
+
+		var jobResp struct {
+			JobID    string `json:"job_id"`
+			ExitCode int    `json:"exit_code"`
+			Output   string `json:"output"`
+			Error    string `json:"error"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&jobResp); err != nil {
+			return WorkerTestMsg{Success: false, Error: "failed to decode response"}
+		}
+
+		if jobResp.ExitCode != 0 {
+			return WorkerTestMsg{Success: false, Error: fmt.Sprintf("exit code %d: %s", jobResp.ExitCode, jobResp.Output)}
+		}
+
+		return WorkerTestMsg{Success: true, Output: jobResp.Output}
 	}
 }

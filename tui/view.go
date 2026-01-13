@@ -165,12 +165,16 @@ func (m Model) View() string {
 	case 3: // Modules
 		statusBar = " [tab]switch [j/k]scroll [x]run tests [r]efresh [q]uit "
 	default:
+		testHint := ""
+		if m.buildPoolStatus == "connected" {
+			testHint = "[T]est worker "
+		}
 		if m.batchRunning && !m.batchPaused {
-			statusBar = " [tab]switch [t]asks [m]odules [r]efresh [p]ause [q]uit "
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[r]efresh [p]ause [q]uit ", testHint)
 		} else if m.batchRunning && m.batchPaused {
-			statusBar = " [tab]switch [t]asks [m]odules [r]efresh [p]resume [q]uit "
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[r]efresh [p]resume [q]uit ", testHint)
 		} else {
-			statusBar = " [tab]switch [t]asks [m]odules [r]efresh [s]tart batch [q]uit "
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[r]efresh [s]tart batch [q]uit ", testHint)
 		}
 	}
 	b.WriteString(statusBarStyle.Width(m.width).Render(statusBar))
