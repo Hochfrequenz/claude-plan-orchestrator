@@ -287,9 +287,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Test worker connection (only on Dashboard tab when build pool is connected)
 			if m.activeTab == 0 && m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
 				m.statusMsg = "Testing worker..."
-				return m, testWorkerCmd(m.buildPoolURL)
+				return m, testWorkerCmd(m.buildPoolURL, m.projectRoot)
 			} else if m.buildPoolStatus != "connected" {
 				m.statusMsg = "Build pool not connected"
+			}
+		case "M":
+			// Toggle mouse mode (allows text selection when disabled)
+			m.mouseEnabled = !m.mouseEnabled
+			if m.mouseEnabled {
+				m.statusMsg = "Mouse enabled (Shift+drag to select text)"
+				return m, tea.EnableMouseCellMotion
+			} else {
+				m.statusMsg = "Mouse disabled (text selection enabled)"
+				return m, tea.DisableMouse
 			}
 		}
 
@@ -919,16 +929,20 @@ func fetchWorkersCmd(buildPoolURL string) tea.Cmd {
 }
 
 // testWorkerCmd sends a test job to verify worker connectivity
-func testWorkerCmd(buildPoolURL string) tea.Cmd {
+func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		client := &http.Client{Timeout: 30 * time.Second}
 
-		// Submit a simple echo command
+		// Submit a simple test command using the project repo
 		jobReq := struct {
 			Command string `json:"command"`
+			Repo    string `json:"repo"`
+			Commit  string `json:"commit"`
 			Timeout int    `json:"timeout"`
 		}{
-			Command: "echo 'hello from worker'",
+			Command: "echo 'hello from worker' && git rev-parse --short HEAD",
+			Repo:    projectRoot,
+			Commit:  "HEAD",
 			Timeout: 10,
 		}
 

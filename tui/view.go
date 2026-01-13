@@ -147,34 +147,41 @@ func (m Model) View() string {
 
 	// Status bar
 	var statusBar string
+
+	// Mouse mode indicator
+	mouseHint := "[M]ouse"
+	if !m.mouseEnabled {
+		mouseHint = "[M]ouse:off"
+	}
+
 	switch m.activeTab {
 	case 1: // Tasks
 		viewModeStr := "priority"
 		if m.viewMode == ViewByModule {
 			viewModeStr = "module"
 		}
-		statusBar = fmt.Sprintf(" [tab]switch [v]iew mode (%s) [j/k]scroll [r]efresh [q]uit ", viewModeStr)
+		statusBar = fmt.Sprintf(" [tab]switch [v]iew mode (%s) [j/k]scroll %s [q]uit ", viewModeStr, mouseHint)
 	case 2: // Agents
 		if m.showAgentDetail {
-			statusBar = " [j/k]scroll [g]top [G]bottom [esc/enter]back [r]esume [q]uit "
+			statusBar = fmt.Sprintf(" [j/k]scroll [g]top [G]bottom [esc/enter]back [r]esume %s [q]uit ", mouseHint)
 		} else if len(m.agents) > 0 {
-			statusBar = " [tab]switch [j/k]navigate [enter]details [+/-]max agents [r]efresh [q]uit "
+			statusBar = fmt.Sprintf(" [tab]switch [j/k]navigate [enter]details [+/-]max agents %s [q]uit ", mouseHint)
 		} else {
-			statusBar = " [tab]switch [+/-]max agents [r]efresh [q]uit "
+			statusBar = fmt.Sprintf(" [tab]switch [+/-]max agents %s [q]uit ", mouseHint)
 		}
 	case 3: // Modules
-		statusBar = " [tab]switch [j/k]scroll [x]run tests [r]efresh [q]uit "
+		statusBar = fmt.Sprintf(" [tab]switch [j/k]scroll [x]run tests %s [q]uit ", mouseHint)
 	default:
 		testHint := ""
 		if m.buildPoolStatus == "connected" {
 			testHint = "[T]est worker "
 		}
 		if m.batchRunning && !m.batchPaused {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[r]efresh [p]ause [q]uit ", testHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[p]ause %s [q]uit ", testHint, mouseHint)
 		} else if m.batchRunning && m.batchPaused {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[r]efresh [p]resume [q]uit ", testHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[p]resume %s [q]uit ", testHint, mouseHint)
 		} else {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[r]efresh [s]tart batch [q]uit ", testHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[s]tart batch %s [q]uit ", testHint, mouseHint)
 		}
 	}
 	b.WriteString(statusBarStyle.Width(m.width).Render(statusBar))

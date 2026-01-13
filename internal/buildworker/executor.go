@@ -52,12 +52,28 @@ func NewExecutor(config ExecutorConfig) *Executor {
 func (e *Executor) RunJob(ctx context.Context, job Job, onOutput OutputCallback) (*buildprotocol.JobResult, error) {
 	start := time.Now()
 
-	// Create worktree for this job
-	wtPath, err := e.createWorktree(job.ID, job.Repo, job.Commit)
-	if err != nil {
-		return nil, fmt.Errorf("creating worktree: %w", err)
+	var wtPath string
+	var err error
+
+	// Only create worktree if a repo is specified
+	if job.Repo != "" {
+		wtPath, err = e.createWorktree(job.ID, job.Repo, job.Commit)
+		if err != nil {
+			return nil, fmt.Errorf("creating worktree: %w", err)
+		}
+		defer e.removeWorktree(job.Repo, wtPath)
+	} else {
+		// No repo - create a temp directory for the job
+		tempBase := e.config.WorktreeDir
+		if tempBase == "" {
+			tempBase = os.TempDir()
+		}
+		wtPath, err = os.MkdirTemp(tempBase, fmt.Sprintf("job-%s-", job.ID))
+		if err != nil {
+			return nil, fmt.Errorf("creating temp dir: %w", err)
+		}
+		defer os.RemoveAll(wtPath)
 	}
-	defer e.removeWorktree(job.Repo, wtPath)
 
 	// Build command
 	var cmd *exec.Cmd

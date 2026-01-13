@@ -87,6 +87,9 @@ type Model struct {
 
 	// Refresh
 	lastRefresh time.Time
+
+	// Mouse mode toggle
+	mouseEnabled bool
 }
 
 // AgentView represents an agent in the TUI
@@ -223,6 +226,7 @@ func NewModel(cfg ModelConfig) Model {
 		planWatcher:     cfg.PlanWatcher,
 		planChangeChan:  cfg.PlanChangeChan,
 		statusMsg:       statusMsg,
+		mouseEnabled:    true,
 	}
 }
 
