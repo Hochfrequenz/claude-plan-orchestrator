@@ -324,10 +324,59 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	agentMgr.SetStore(agentStoreAdp)
 
 	// Recover any agents that were running before
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	recoveredAgents, err := agentMgr.RecoverAgents(ctx)
 	if err != nil {
 		fmt.Printf("Warning: failed to recover agents: %v\n", err)
+	}
+
+	// Start build pool coordinator if enabled
+	var buildPoolCoord *buildpool.Coordinator
+	var buildPoolGitDaemon *buildpool.GitDaemon
+	if cfg.BuildPool.Enabled {
+		// Create registry
+		registry := buildpool.NewRegistry()
+
+		// Set up embedded worker if enabled
+		var embeddedFunc buildpool.EmbeddedWorkerFunc
+		if cfg.BuildPool.LocalFallback.Enabled {
+			embedded := buildpool.NewEmbeddedWorker(buildpool.EmbeddedConfig{
+				RepoDir:     cfg.General.ProjectRoot,
+				WorktreeDir: cfg.BuildPool.LocalFallback.WorktreeDir,
+				MaxJobs:     cfg.BuildPool.LocalFallback.MaxJobs,
+				UseNixShell: true,
+			})
+			embeddedFunc = embedded.Run
+		}
+
+		// Create dispatcher with embedded worker
+		dispatcher := buildpool.NewDispatcher(registry, embeddedFunc)
+
+		// Create coordinator
+		buildPoolCoord = buildpool.NewCoordinator(buildpool.CoordinatorConfig{
+			WebSocketPort:     cfg.BuildPool.WebSocketPort,
+			HeartbeatInterval: time.Duration(cfg.BuildPool.Timeouts.HeartbeatIntervalSecs) * time.Second,
+			HeartbeatTimeout:  time.Duration(cfg.BuildPool.Timeouts.HeartbeatTimeoutSecs) * time.Second,
+		}, registry, dispatcher)
+
+		// Start git daemon
+		buildPoolGitDaemon = buildpool.NewGitDaemon(buildpool.GitDaemonConfig{
+			Port:       cfg.BuildPool.GitDaemonPort,
+			BaseDir:    cfg.General.ProjectRoot,
+			ListenAddr: cfg.BuildPool.GitDaemonListenAddr,
+		})
+		if err := buildPoolGitDaemon.Start(ctx); err != nil {
+			fmt.Printf("Warning: failed to start git daemon: %v\n", err)
+		} else {
+			// Run coordinator in goroutine
+			go func() {
+				if err := buildPoolCoord.Start(ctx); err != nil && ctx.Err() == nil {
+					fmt.Printf("Build pool coordinator error: %v\n", err)
+				}
+			}()
+		}
 	}
 
 	// Convert recovered agents to AgentViews for TUI
@@ -414,6 +463,15 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	finalModel, err := p.Run()
+
+	// Stop build pool coordinator if it was started
+	if buildPoolCoord != nil {
+		buildPoolCoord.Stop()
+	}
+	if buildPoolGitDaemon != nil {
+		buildPoolGitDaemon.Stop()
+	}
+
 	if err != nil {
 		return err
 	}

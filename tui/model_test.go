@@ -607,9 +607,9 @@ func TestModel_AgentCompleteMsg(t *testing.T) {
 	newModel, _ := model.Update(AgentCompleteMsg{TaskID: "test/E00", Success: true})
 	model = newModel.(Model)
 
-	// Verify agent status
-	if model.agents[0].Status != executor.AgentCompleted {
-		t.Errorf("agent[0].Status = %v, want AgentCompleted", model.agents[0].Status)
+	// Verify agent is removed from list on successful completion
+	if len(model.agents) != 0 {
+		t.Errorf("len(agents) = %d, want 0 (agent should be removed on success)", len(model.agents))
 	}
 
 	// Verify batch completed since no more running agents
