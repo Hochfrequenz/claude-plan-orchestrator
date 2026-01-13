@@ -153,7 +153,12 @@ func (e *Executor) createWorktree(jobID, repo, commit string) (string, error) {
 		return wtPath, nil
 	}
 
-	// For remote repos, fetch first
+	// For remote repos, fetch into git cache directory
+	// First ensure git cache dir exists and is a git repo
+	if err := e.ensureGitCacheDir(); err != nil {
+		return "", fmt.Errorf("git cache init: %w", err)
+	}
+
 	cmd := exec.Command("git", "fetch", repo, commit)
 	cmd.Dir = e.config.GitCacheDir
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -197,4 +202,37 @@ func randomSuffix() string {
 	b := make([]byte, 4)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// ensureGitCacheDir ensures the git cache directory exists and is a git repo
+func (e *Executor) ensureGitCacheDir() error {
+	if e.config.GitCacheDir == "" {
+		return fmt.Errorf("git cache directory not configured")
+	}
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(e.config.GitCacheDir, 0755); err != nil {
+		return err
+	}
+
+	// Check if it's already a git repo
+	gitDir := filepath.Join(e.config.GitCacheDir, ".git")
+	if _, err := os.Stat(gitDir); err == nil {
+		return nil // Already a git repo
+	}
+
+	// Also check if it's a bare repo (no .git subdir, but has HEAD)
+	headFile := filepath.Join(e.config.GitCacheDir, "HEAD")
+	if _, err := os.Stat(headFile); err == nil {
+		return nil // Already a bare git repo
+	}
+
+	// Initialize as a bare repository
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = e.config.GitCacheDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git init --bare: %s: %w", out, err)
+	}
+
+	return nil
 }
