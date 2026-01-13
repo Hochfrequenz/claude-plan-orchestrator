@@ -277,9 +277,12 @@ func (a *Agent) Start(ctx context.Context) error {
 		"--session-id", a.SessionID,      // Named session for resume capability
 	}
 
-	// Add MCP config if build-mcp binary is available
+	// Add MCP config if available (from project's .mcp.json + orchestrator MCPs)
 	if mcpConfig := a.generateMCPConfig(); mcpConfig != "" {
 		args = append(args, "--mcp-config", mcpConfig)
+		fmt.Printf("[DEBUG] Agent %s MCP config: %s\n", a.TaskID.String(), mcpConfig)
+	} else {
+		fmt.Printf("[DEBUG] Agent %s: no MCP config (no .mcp.json in %s)\n", a.TaskID.String(), a.WorktreePath)
 	}
 
 	// Add prompt
@@ -636,28 +639,42 @@ func (a *Agent) GetUsage() (int, int, float64) {
 	return a.TokensInput, a.TokensOutput, a.CostUSD
 }
 
-// generateMCPConfig creates an MCP config for the build-pool server if available
-// Returns the config as a JSON string, or empty string if build-mcp is not available
+// generateMCPConfig creates an MCP config by merging the project's .mcp.json with orchestrator MCPs.
+// Returns the config as a JSON string, or empty string if no MCPs are configured.
 func (a *Agent) generateMCPConfig() string {
-	// Check if build-mcp binary is in PATH
-	buildMCPPath, err := exec.LookPath("build-mcp")
-	if err != nil {
-		// build-mcp not installed, skip MCP config
+	mcpServers := make(map[string]interface{})
+
+	// 1. Load project's .mcp.json if it exists
+	projectConfigPath := filepath.Join(a.WorktreePath, ".mcp.json")
+	if data, err := os.ReadFile(projectConfigPath); err == nil {
+		var projectConfig struct {
+			MCPServers map[string]interface{} `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &projectConfig); err == nil {
+			for name, config := range projectConfig.MCPServers {
+				mcpServers[name] = config
+			}
+		}
+	}
+
+	// 2. Add build-mcp if available (orchestrator's own MCP)
+	if buildMCPPath, err := exec.LookPath("build-mcp"); err == nil {
+		mcpServers["build-pool"] = map[string]interface{}{
+			"command": buildMCPPath,
+			"args":    []string{},
+			"env": map[string]string{
+				"BUILD_POOL_URL": "http://localhost:8081",
+			},
+		}
+	}
+
+	// Return empty if no MCPs configured
+	if len(mcpServers) == 0 {
 		return ""
 	}
 
-	// Generate MCP config JSON
-	// The config format is: {"mcpServers": {"name": {"command": "...", "args": [...]}}}
 	config := map[string]interface{}{
-		"mcpServers": map[string]interface{}{
-			"build-pool": map[string]interface{}{
-				"command": buildMCPPath,
-				"args":    []string{},
-				"env": map[string]string{
-					"BUILD_POOL_URL": "http://localhost:8081",
-				},
-			},
-		},
+		"mcpServers": mcpServers,
 	}
 
 	configJSON, err := json.Marshal(config)

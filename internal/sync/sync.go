@@ -121,7 +121,8 @@ func (s *Syncer) SyncAll(tasks []*domain.Task) error {
 	return nil
 }
 
-// UpdateEpicFrontmatter updates the status field in an epic file's YAML frontmatter
+// UpdateEpicFrontmatter updates the status field in an epic file's YAML frontmatter.
+// If the file has no frontmatter, it adds one with the status field.
 func (s *Syncer) UpdateEpicFrontmatter(epicPath string, status domain.TaskStatus) error {
 	content, err := os.ReadFile(epicPath)
 	if err != nil {
@@ -132,7 +133,9 @@ func (s *Syncer) UpdateEpicFrontmatter(epicPath string, status domain.TaskStatus
 
 	// Check if file has frontmatter (starts with ---)
 	if !strings.HasPrefix(contentStr, "---") {
-		return fmt.Errorf("epic file %s has no frontmatter", epicPath)
+		// No frontmatter - add one with status
+		newFrontmatter := fmt.Sprintf("---\nstatus: %s\n---\n", status)
+		return os.WriteFile(epicPath, []byte(newFrontmatter+contentStr), 0644)
 	}
 
 	// Find the end of frontmatter

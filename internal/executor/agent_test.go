@@ -2,6 +2,9 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -94,3 +97,76 @@ func TestAgent_Run_Integration(t *testing.T) {
 }
 
 var _ = context.Background // silence unused import
+
+func TestAgent_generateMCPConfig(t *testing.T) {
+	t.Run("loads project .mcp.json", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a .mcp.json in the temp dir
+		mcpConfig := map[string]interface{}{
+			"mcpServers": map[string]interface{}{
+				"test-runner": map[string]interface{}{
+					"command": "/usr/local/bin/test-runner",
+					"args":    []string{"--verbose"},
+				},
+				"code-analyzer": map[string]interface{}{
+					"command": "npx",
+					"args":    []string{"code-analyzer"},
+				},
+			},
+		}
+		configData, _ := json.Marshal(mcpConfig)
+		os.WriteFile(filepath.Join(dir, ".mcp.json"), configData, 0644)
+
+		agent := &Agent{
+			WorktreePath: dir,
+		}
+
+		result := agent.generateMCPConfig()
+		if result == "" {
+			t.Fatal("Expected non-empty MCP config")
+		}
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+			t.Fatalf("Failed to parse config JSON: %v", err)
+		}
+
+		servers, ok := parsed["mcpServers"].(map[string]interface{})
+		if !ok {
+			t.Fatal("Expected mcpServers in config")
+		}
+
+		if _, ok := servers["test-runner"]; !ok {
+			t.Error("Expected test-runner in config")
+		}
+		if _, ok := servers["code-analyzer"]; !ok {
+			t.Error("Expected code-analyzer in config")
+		}
+	})
+
+	t.Run("returns empty when no mcp.json and no build-mcp", func(t *testing.T) {
+		dir := t.TempDir()
+
+		agent := &Agent{
+			WorktreePath: dir,
+		}
+
+		// Note: This test assumes build-mcp is not in PATH during test
+		// If build-mcp is in PATH, the test may pass with build-pool only
+		result := agent.generateMCPConfig()
+
+		// Either empty or contains only build-pool
+		if result != "" {
+			var parsed map[string]interface{}
+			json.Unmarshal([]byte(result), &parsed)
+			servers := parsed["mcpServers"].(map[string]interface{})
+			// Should only have build-pool if anything
+			for name := range servers {
+				if name != "build-pool" {
+					t.Errorf("Unexpected server %s in config", name)
+				}
+			}
+		}
+	})
+}

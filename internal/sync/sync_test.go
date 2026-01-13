@@ -3,6 +3,7 @@ package sync
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
@@ -151,15 +152,31 @@ priority: low
 		}
 	})
 
-	t.Run("errors on missing frontmatter", func(t *testing.T) {
+	t.Run("adds frontmatter when missing", func(t *testing.T) {
 		epicPath := filepath.Join(dir, "epic-03.md")
 		content := `# Epic 03: No Frontmatter
 `
 		os.WriteFile(epicPath, []byte(content), 0644)
 
 		err := syncer.UpdateEpicFrontmatter(epicPath, domain.StatusInProgress)
-		if err == nil {
-			t.Error("Should error on missing frontmatter")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		updated, _ := os.ReadFile(epicPath)
+		updatedStr := string(updated)
+		if !containsString(updatedStr, "status: in_progress") {
+			t.Error("Status should be added in new frontmatter")
+		}
+		if !containsString(updatedStr, "# Epic 03: No Frontmatter") {
+			t.Error("Original content should be preserved")
+		}
+		// Verify frontmatter structure
+		if !strings.HasPrefix(updatedStr, "---\n") {
+			t.Error("Should start with frontmatter delimiter")
+		}
+		if !containsString(updatedStr, "\n---\n") {
+			t.Error("Should have closing frontmatter delimiter")
 		}
 	})
 }
