@@ -1,0 +1,256 @@
+// internal/buildpool/coordinator_test.go
+package buildpool
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+func TestCoordinator_AcceptWorker(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{
+		WebSocketPort: 0, // Use any available port
+	})
+
+	// Create test server
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
+	defer server.Close()
+
+	// Connect as worker
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// Send register message
+	registerMsg := `{"type":"register","payload":{"worker_id":"test-worker","max_jobs":4}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(registerMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	// Give time for registration
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify worker is registered
+	if coord.Registry().Count() != 1 {
+		t.Errorf("got worker count=%d, want 1", coord.Registry().Count())
+	}
+
+	worker := coord.Registry().Get("test-worker")
+	if worker == nil {
+		t.Fatal("worker not found in registry")
+	}
+	if worker.MaxJobs != 4 {
+		t.Errorf("got max_jobs=%d, want 4", worker.MaxJobs)
+	}
+}
+
+func TestCoordinator_WorkerDisconnect(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{})
+
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+
+	// Register worker
+	registerMsg := `{"type":"register","payload":{"worker_id":"disconnect-test","max_jobs":2}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(registerMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if coord.Registry().Count() != 1 {
+		t.Fatalf("worker not registered")
+	}
+
+	// Close connection
+	conn.Close()
+
+	// Give time for cleanup
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify worker is unregistered
+	if coord.Registry().Count() != 0 {
+		t.Errorf("got worker count=%d, want 0", coord.Registry().Count())
+	}
+}
+
+func TestCoordinator_ReadyMessage(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{})
+
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// Register
+	registerMsg := `{"type":"register","payload":{"worker_id":"ready-test","max_jobs":4}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(registerMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	worker := coord.Registry().Get("ready-test")
+	if worker == nil {
+		t.Fatal("worker not found")
+	}
+
+	// Verify initial slots
+	if worker.Slots != 4 {
+		t.Errorf("got initial slots=%d, want 4", worker.Slots)
+	}
+
+	// Send ready message with updated slots
+	readyMsg := `{"type":"ready","payload":{"slots":2}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(readyMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify slots updated
+	if worker.Slots != 2 {
+		t.Errorf("got slots=%d, want 2", worker.Slots)
+	}
+}
+
+func TestCoordinator_CompleteMessage(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{})
+
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// Register
+	registerMsg := `{"type":"register","payload":{"worker_id":"complete-test","max_jobs":2}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(registerMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Submit a job to dispatcher
+	job := &struct {
+		JobID   string `json:"job_id"`
+		Command string `json:"command"`
+	}{
+		JobID:   "test-job-1",
+		Command: "echo hello",
+	}
+	_ = job // We'll test complete message handling through the dispatcher
+
+	// Send complete message
+	completeMsg := `{"type":"complete","payload":{"job_id":"test-job-1","exit_code":0,"duration_ms":1500}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(completeMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// The complete should be processed without errors
+	// (actual result handling tested through dispatcher integration)
+}
+
+func TestCoordinator_Pong(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{})
+
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// Register
+	registerMsg := `{"type":"register","payload":{"worker_id":"pong-test","max_jobs":1}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(registerMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	worker := coord.Registry().Get("pong-test")
+	if worker == nil {
+		t.Fatal("worker not found")
+	}
+
+	initialHeartbeat := worker.LastHeartbeat
+
+	// Wait a bit then send pong
+	time.Sleep(10 * time.Millisecond)
+	pongMsg := `{"type":"pong"}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(pongMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify heartbeat was updated
+	if !worker.LastHeartbeat.After(initialHeartbeat) {
+		t.Error("heartbeat was not updated after pong")
+	}
+}
+
+func TestCoordinator_ErrorMessage(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{})
+
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleWebSocket))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// Register
+	registerMsg := `{"type":"register","payload":{"worker_id":"error-test","max_jobs":2}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(registerMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Send error message
+	errorMsg := `{"type":"error","payload":{"job_id":"test-job-2","message":"command not found"}}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(errorMsg)); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Error message should be processed without panic
+	// (actual error handling tested through dispatcher integration)
+}
+
+func TestCoordinator_Dispatcher(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{})
+
+	if coord.Dispatcher() == nil {
+		t.Error("dispatcher should not be nil")
+	}
+
+	if coord.Registry() == nil {
+		t.Error("registry should not be nil")
+	}
+}
