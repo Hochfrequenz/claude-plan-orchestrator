@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -949,6 +950,12 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 			if idx := strings.Index(hostPart, "/"); idx != -1 {
 				hostPart = hostPart[:idx]
 			}
+
+			// If localhost, try to get a network-accessible address for remote workers
+			if hostPart == "localhost" || hostPart == "127.0.0.1" {
+				hostPart = getExternalHost()
+			}
+
 			gitURL = fmt.Sprintf("git://%s:9418/", hostPart)
 		}
 
@@ -1001,4 +1008,23 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 
 		return WorkerTestMsg{Success: true, Output: jobResp.Output}
 	}
+}
+
+// getExternalHost tries to get a network-accessible address for this machine
+// Prefers Tailscale IP, falls back to hostname
+func getExternalHost() string {
+	// Try Tailscale IP first (most reliable for remote access)
+	if out, err := exec.Command("tailscale", "ip", "-4").Output(); err == nil {
+		if ip := strings.TrimSpace(string(out)); ip != "" {
+			return ip
+		}
+	}
+
+	// Try hostname
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		return hostname
+	}
+
+	// Last resort - return localhost (will likely fail for remote workers)
+	return "localhost"
 }
