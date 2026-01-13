@@ -2,7 +2,9 @@
 package buildworker
 
 import (
+	"context"
 	"testing"
+	"time"
 )
 
 func TestWorkerConfig_Validate(t *testing.T) {
@@ -47,5 +49,42 @@ func TestWorkerConfig_Validate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestWorker_JobTracking(t *testing.T) {
+	config := WorkerConfig{
+		ServerURL: "ws://localhost:9999/ws", // Won't connect
+		WorkerID:  "test",
+		MaxJobs:   2,
+	}
+
+	w, err := NewWorker(config)
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+
+	// Track a job
+	ctx, cancel := context.WithCancel(context.Background())
+	w.TrackJob("job-1", cancel)
+
+	if !w.HasJob("job-1") {
+		t.Error("HasJob(job-1) = false, want true")
+	}
+
+	// Cancel the job
+	w.CancelJob("job-1")
+
+	// Verify context was cancelled
+	select {
+	case <-ctx.Done():
+		// Expected
+	case <-time.After(100 * time.Millisecond):
+		t.Error("context was not cancelled")
+	}
+
+	// Verify job is untracked
+	if w.HasJob("job-1") {
+		t.Error("HasJob(job-1) after cancel = true, want false")
 	}
 }

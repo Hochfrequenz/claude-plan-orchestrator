@@ -45,6 +45,10 @@ type Worker struct {
 	// For graceful shutdown
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Job tracking for cancellation
+	jobsMu sync.Mutex
+	jobs   map[string]context.CancelFunc
 }
 
 // NewWorker creates a new worker client
@@ -65,6 +69,7 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 		}),
 		ctx:    ctx,
 		cancel: cancel,
+		jobs:   make(map[string]context.CancelFunc),
 	}, nil
 }
 
@@ -203,5 +208,41 @@ func (w *Worker) Stop() {
 	w.cancel()
 	if w.conn != nil {
 		w.conn.Close()
+	}
+}
+
+// TrackJob registers a job's cancel function for later cancellation
+func (w *Worker) TrackJob(jobID string, cancel context.CancelFunc) {
+	w.jobsMu.Lock()
+	defer w.jobsMu.Unlock()
+	w.jobs[jobID] = cancel
+}
+
+// UntrackJob removes a job from tracking
+func (w *Worker) UntrackJob(jobID string) {
+	w.jobsMu.Lock()
+	defer w.jobsMu.Unlock()
+	delete(w.jobs, jobID)
+}
+
+// HasJob checks if a job is being tracked
+func (w *Worker) HasJob(jobID string) bool {
+	w.jobsMu.Lock()
+	defer w.jobsMu.Unlock()
+	_, ok := w.jobs[jobID]
+	return ok
+}
+
+// CancelJob cancels a running job
+func (w *Worker) CancelJob(jobID string) {
+	w.jobsMu.Lock()
+	cancel, ok := w.jobs[jobID]
+	if ok {
+		delete(w.jobs, jobID)
+	}
+	w.jobsMu.Unlock()
+
+	if ok && cancel != nil {
+		cancel()
 	}
 }
