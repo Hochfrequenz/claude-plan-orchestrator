@@ -209,6 +209,7 @@ func (c *Coordinator) sendCancelToWorker(workerID, jobID string) error {
 func (c *Coordinator) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", c.HandleWebSocket)
+	mux.HandleFunc("/status", c.HandleStatus)
 
 	addr := fmt.Sprintf(":%d", c.config.WebSocketPort)
 	c.server = &http.Server{
@@ -220,6 +221,29 @@ func (c *Coordinator) Start(ctx context.Context) error {
 
 	log.Printf("coordinator listening on %s", addr)
 	return c.server.ListenAndServe()
+}
+
+// HandleStatus returns the current status of workers and jobs
+func (c *Coordinator) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	workers := []map[string]interface{}{}
+	for _, worker := range c.registry.All() {
+		maxJobs, slots, connectedAt := worker.GetStatus()
+		workers = append(workers, map[string]interface{}{
+			"id":              worker.ID,
+			"max_jobs":        maxJobs,
+			"active_jobs":     maxJobs - slots,
+			"connected_since": connectedAt.Format(time.RFC3339),
+		})
+	}
+
+	status := map[string]interface{}{
+		"workers":               workers,
+		"queued_jobs":           c.dispatcher.QueuedCount(),
+		"local_fallback_active": c.dispatcher.LocalFallbackActive(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
 }
 
 // Stop stops the coordinator server

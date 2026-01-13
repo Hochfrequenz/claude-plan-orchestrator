@@ -80,6 +80,9 @@ type Model struct {
 	batchPaused  bool
 	statusMsg    string
 
+	// Build pool
+	buildPoolURL string
+
 	// Refresh
 	lastRefresh time.Time
 }
@@ -124,6 +127,7 @@ type ModelConfig struct {
 	Workers         []*WorkerView
 	ProjectRoot     string
 	WorktreeDir     string
+	BuildPoolURL    string // URL for build pool status (e.g., "http://localhost:8081")
 	AgentManager    *executor.AgentManager
 	WorktreeManager *executor.WorktreeManager
 	RecoveredAgents []*AgentView // Agents recovered from previous session
@@ -197,6 +201,7 @@ func NewModel(cfg ModelConfig) Model {
 		activeTab:       0,
 		projectRoot:     cfg.ProjectRoot,
 		worktreeDir:     cfg.WorktreeDir,
+		buildPoolURL:    cfg.BuildPoolURL,
 		agentManager:    agentMgr,
 		worktreeManager: worktreeMgr,
 		planWatcher:     cfg.PlanWatcher,

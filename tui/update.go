@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -68,6 +70,11 @@ type AgentResumeMsg struct {
 	TaskID  string
 	Success bool
 	Error   string
+}
+
+// WorkersUpdateMsg updates the workers list from build pool
+type WorkersUpdateMsg struct {
+	Workers []*WorkerView
 }
 
 // Update handles messages
@@ -338,7 +345,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.agentManager != nil && m.batchRunning {
 			m.updateAgentsFromManager()
 		}
-		return m, tickCmd()
+		// Fetch workers if build pool is configured
+		cmds := []tea.Cmd{tickCmd()}
+		if m.buildPoolURL != "" {
+			cmds = append(cmds, fetchWorkersCmd(m.buildPoolURL))
+		}
+		return m, tea.Batch(cmds...)
+
+	case WorkersUpdateMsg:
+		m.workers = msg.Workers
+		return m, nil
 
 	case AgentUpdateMsg:
 		// Update agent view with new status
@@ -830,5 +846,48 @@ func resumeAgentCmd(agentMgr *executor.AgentManager, taskID string) tea.Cmd {
 			TaskID:  taskID,
 			Success: true,
 		}
+	}
+}
+
+// fetchWorkersCmd fetches worker status from the build pool coordinator
+func fetchWorkersCmd(buildPoolURL string) tea.Cmd {
+	return func() tea.Msg {
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get(buildPoolURL + "/status")
+		if err != nil {
+			// Silently fail - coordinator might not be running
+			return WorkersUpdateMsg{Workers: nil}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return WorkersUpdateMsg{Workers: nil}
+		}
+
+		var status struct {
+			Workers []struct {
+				ID             string `json:"id"`
+				MaxJobs        int    `json:"max_jobs"`
+				ActiveJobs     int    `json:"active_jobs"`
+				ConnectedSince string `json:"connected_since"`
+			} `json:"workers"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+			return WorkersUpdateMsg{Workers: nil}
+		}
+
+		workers := make([]*WorkerView, 0, len(status.Workers))
+		for _, w := range status.Workers {
+			connectedAt, _ := time.Parse(time.RFC3339, w.ConnectedSince)
+			workers = append(workers, &WorkerView{
+				ID:          w.ID,
+				MaxJobs:     w.MaxJobs,
+				ActiveJobs:  w.ActiveJobs,
+				ConnectedAt: connectedAt,
+			})
+		}
+
+		return WorkersUpdateMsg{Workers: workers}
 	}
 }

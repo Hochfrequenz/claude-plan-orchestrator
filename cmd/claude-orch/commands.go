@@ -392,12 +392,19 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Build pool URL for TUI to fetch worker status
+	var buildPoolURL string
+	if cfg.BuildPool.Enabled {
+		buildPoolURL = fmt.Sprintf("http://localhost:%d", cfg.BuildPool.WebSocketPort)
+	}
+
 	model := tui.NewModel(tui.ModelConfig{
 		MaxActive:       cfg.General.MaxParallelAgents,
 		AllTasks:        allTasks,
 		Queued:          queued,
 		ProjectRoot:     cfg.General.ProjectRoot,
 		WorktreeDir:     cfg.General.WorktreeDir,
+		BuildPoolURL:    buildPoolURL,
 		AgentManager:    agentMgr,
 		RecoveredAgents: recoveredViews,
 		PlanWatcher:     planWatcher,

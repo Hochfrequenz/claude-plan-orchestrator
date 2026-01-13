@@ -194,3 +194,13 @@ func (d *Dispatcher) RequeueWorkerJobs(workerID string) {
 		}
 	}
 }
+
+// QueuedCount returns the number of queued jobs (alias for QueueLength)
+func (d *Dispatcher) QueuedCount() int {
+	return d.QueueLength()
+}
+
+// LocalFallbackActive returns true if local fallback is configured
+func (d *Dispatcher) LocalFallbackActive() bool {
+	return d.embedded != nil
+}
