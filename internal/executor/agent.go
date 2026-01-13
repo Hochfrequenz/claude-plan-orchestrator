@@ -658,7 +658,8 @@ func (a *Agent) generateMCPConfig() string {
 	}
 
 	// 2. Add build-mcp if available (orchestrator's own MCP)
-	if buildMCPPath, err := exec.LookPath("build-mcp"); err == nil {
+	buildMCPPath := findBuildMCP()
+	if buildMCPPath != "" {
 		mcpServers["build-pool"] = map[string]interface{}{
 			"command": buildMCPPath,
 			"args":    []string{},
@@ -683,6 +684,35 @@ func (a *Agent) generateMCPConfig() string {
 	}
 
 	return string(configJSON)
+}
+
+// findBuildMCP locates the build-mcp binary by checking:
+// 1. BUILD_MCP_PATH environment variable
+// 2. Same directory as the current executable
+// 3. System PATH
+func findBuildMCP() string {
+	// 1. Check environment variable
+	if path := os.Getenv("BUILD_MCP_PATH"); path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	// 2. Check same directory as current executable
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		buildMCPPath := filepath.Join(exeDir, "build-mcp")
+		if _, err := os.Stat(buildMCPPath); err == nil {
+			return buildMCPPath
+		}
+	}
+
+	// 3. Check system PATH
+	if path, err := exec.LookPath("build-mcp"); err == nil {
+		return path
+	}
+
+	return ""
 }
 
 // Duration returns how long the agent has been running
