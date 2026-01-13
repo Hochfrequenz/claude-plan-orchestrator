@@ -91,11 +91,20 @@ const (
 	TypePong     = "pong"
 )
 
+// Verbosity levels for MCP tool output
+const (
+	VerbosityMinimal = "minimal" // Exit code + stderr only (default)
+	VerbosityNormal  = "normal"  // Exit code + stderr + last 50 lines stdout
+	VerbosityFull    = "full"    // Exit code + all output
+)
+
 // JobResult is the complete result returned to MCP callers
 type JobResult struct {
 	JobID        string  `json:"job_id"`
 	ExitCode     int     `json:"exit_code"`
-	Output       string  `json:"output"`
+	Stdout       string  `json:"stdout,omitempty"`
+	Stderr       string  `json:"stderr,omitempty"`
+	Output       string  `json:"output,omitempty"` // Deprecated: kept for backwards compat
 	DurationSecs float64 `json:"duration_secs"`
 
 	// Parsed from test output (optional)

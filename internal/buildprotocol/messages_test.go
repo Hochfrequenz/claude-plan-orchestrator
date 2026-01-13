@@ -72,3 +72,32 @@ test result: FAILED. 3 passed; 1 failed; 1 ignored`
 		t.Errorf("got ignored=%d, want 1", result.TestsIgnored)
 	}
 }
+
+func TestVerbosityConstants(t *testing.T) {
+	// Verify constants are defined
+	if VerbosityMinimal != "minimal" {
+		t.Errorf("VerbosityMinimal = %q, want %q", VerbosityMinimal, "minimal")
+	}
+	if VerbosityNormal != "normal" {
+		t.Errorf("VerbosityNormal = %q, want %q", VerbosityNormal, "normal")
+	}
+	if VerbosityFull != "full" {
+		t.Errorf("VerbosityFull = %q, want %q", VerbosityFull, "full")
+	}
+}
+
+func TestJobResultSeparateStreams(t *testing.T) {
+	result := JobResult{
+		JobID:    "test-123",
+		ExitCode: 0,
+		Stdout:   "build output",
+		Stderr:   "warnings here",
+	}
+
+	if result.Stdout != "build output" {
+		t.Errorf("Stdout = %q, want %q", result.Stdout, "build output")
+	}
+	if result.Stderr != "warnings here" {
+		t.Errorf("Stderr = %q, want %q", result.Stderr, "warnings here")
+	}
+}
