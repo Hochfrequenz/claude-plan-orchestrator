@@ -108,13 +108,15 @@ func (w *Worker) Connect() error {
 	// Set up WebSocket-level ping handler to extend read deadline when coordinator pings us
 	conn.SetReadDeadline(time.Now().Add(pingWait))
 	conn.SetPingHandler(func(appData string) error {
-		log.Printf("received ping from coordinator, extending deadline")
+		log.Printf("received ping from coordinator, extending deadline to %v", pingWait)
 		conn.SetReadDeadline(time.Now().Add(pingWait))
 		// Send pong response (must do this since we override the default handler)
 		deadline := time.Now().Add(writeWait)
 		err := conn.WriteControl(websocket.PongMessage, []byte(appData), deadline)
 		if err != nil {
 			log.Printf("failed to send pong: %v", err)
+		} else {
+			log.Printf("sent pong to coordinator")
 		}
 		return err
 	})

@@ -98,9 +98,10 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 	}()
 
 	// Set up WebSocket-level pong handler to extend read deadline
+	log.Printf("new worker connection, setting read deadline to %v", c.config.HeartbeatTimeout)
 	conn.SetReadDeadline(time.Now().Add(c.config.HeartbeatTimeout))
 	conn.SetPongHandler(func(appData string) error {
-		log.Printf("received pong from worker, extending deadline")
+		log.Printf("received pong from worker %s, extending deadline to %v", workerID, c.config.HeartbeatTimeout)
 		conn.SetReadDeadline(time.Now().Add(c.config.HeartbeatTimeout))
 		return nil
 	})
@@ -233,7 +234,8 @@ func (c *Coordinator) Start(ctx context.Context) error {
 
 	go c.heartbeatLoop(ctx)
 
-	log.Printf("coordinator listening on %s", addr)
+	log.Printf("coordinator listening on %s (heartbeat_interval=%v, heartbeat_timeout=%v)",
+		addr, c.config.HeartbeatInterval, c.config.HeartbeatTimeout)
 	return c.server.ListenAndServe()
 }
 
