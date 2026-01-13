@@ -3,6 +3,8 @@ package buildpool
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,6 +46,12 @@ func NewMCPServer(config MCPServerConfig, dispatcher *Dispatcher) *MCPServer {
 	s.loadRepoInfo()
 
 	return s
+}
+
+func randomJobSuffix() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 func (s *MCPServer) loadRepoInfo() {
@@ -153,9 +161,14 @@ func (s *MCPServer) buildCommand(tool string, args map[string]interface{}) strin
 
 	// Common args - features
 	if features, ok := args["features"].([]interface{}); ok && len(features) > 0 {
-		featureStrs := make([]string, len(features))
-		for i, f := range features {
-			featureStrs[i] = f.(string)
+		featureStrs := make([]string, 0, len(features))
+		for _, f := range features {
+			if s, ok := f.(string); ok {
+				featureStrs = append(featureStrs, s)
+			}
+		}
+		if len(featureStrs) == 0 {
+			return strings.Join(parts, " ")
 		}
 		// Insert before any -- args
 		insertPos := len(parts)
@@ -201,7 +214,11 @@ func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildpr
 	case "build", "clippy", "test":
 		command = s.buildCommand(name, args)
 	case "run_command":
-		command = args["command"].(string)
+		cmd, ok := args["command"].(string)
+		if !ok || cmd == "" {
+			return nil, fmt.Errorf("run_command requires 'command' argument")
+		}
+		command = cmd
 		if t, ok := args["timeout_secs"].(float64); ok {
 			timeout = int(t)
 		}
@@ -213,7 +230,7 @@ func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildpr
 	}
 
 	// Create job
-	jobID := fmt.Sprintf("mcp-%d", os.Getpid())
+	jobID := fmt.Sprintf("mcp-%s", randomJobSuffix())
 	job := &buildprotocol.JobMessage{
 		JobID:   jobID,
 		Repo:    s.repoURL,

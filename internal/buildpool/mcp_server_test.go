@@ -302,6 +302,64 @@ func TestMCPServer_CallTool_UnknownTool(t *testing.T) {
 	}
 }
 
+func TestMCPServer_CallTool_RunCommandMissingArg(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	// Test with nil args
+	_, err := server.CallTool("run_command", nil)
+	if err == nil {
+		t.Error("expected error for run_command without command arg")
+	}
+	if err.Error() != "run_command requires 'command' argument" {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test with empty args
+	_, err = server.CallTool("run_command", map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for run_command with empty args")
+	}
+	if err.Error() != "run_command requires 'command' argument" {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test with empty command string
+	_, err = server.CallTool("run_command", map[string]interface{}{"command": ""})
+	if err == nil {
+		t.Error("expected error for run_command with empty command")
+	}
+	if err.Error() != "run_command requires 'command' argument" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCPServer_BuildCommand_InvalidFeatures(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	// Test with non-string feature elements - should not panic
+	args := map[string]interface{}{
+		"features": []interface{}{123, "valid", nil, true},
+	}
+	cmd := server.buildCommand("build", args)
+	// Should only include the valid string feature
+	if cmd != "cargo build --features valid" {
+		t.Errorf("got %q, want %q", cmd, "cargo build --features valid")
+	}
+
+	// Test with all invalid features - should return base command
+	args = map[string]interface{}{
+		"features": []interface{}{123, nil},
+	}
+	cmd = server.buildCommand("build", args)
+	if cmd != "cargo build" {
+		t.Errorf("got %q, want %q", cmd, "cargo build")
+	}
+}
+
 func TestMCPServer_ToolSchema(t *testing.T) {
 	server := NewMCPServer(MCPServerConfig{
 		WorktreePath: "/tmp/test-worktree",
