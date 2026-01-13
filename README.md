@@ -453,6 +453,16 @@ max_jobs = 4         # Concurrent build jobs
 [storage]
 git_cache_dir = "/var/cache/build-agent/repos"
 worktree_dir = "/tmp/build-agent/jobs"
+
+[nix]
+# Prewarm nix store on startup with common packages
+# This speeds up first job by pre-downloading toolchains
+prewarm_packages = [
+  "nixpkgs#rustc",
+  "nixpkgs#cargo",
+  "nixpkgs#clippy",
+  "nixpkgs#rustfmt"
+]
 ```
 
 #### Option 3: NixOS Module
@@ -517,6 +527,7 @@ sudo systemctl start build-agent
 - **Output Streaming**: Build output streams back in real-time
 - **Concurrent Jobs**: Each agent can run multiple jobs in parallel
 - **Git Caching**: Repository clones are cached to speed up subsequent jobs
+- **Nix Store Prewarm**: Optionally pre-download common toolchains at startup to speed up first job
 
 ### Monitoring Workers
 

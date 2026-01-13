@@ -52,6 +52,9 @@ type Config struct {
 		GitCacheDir string `toml:"git_cache_dir"`
 		WorktreeDir string `toml:"worktree_dir"`
 	} `toml:"storage"`
+	Nix struct {
+		PrewarmPackages []string `toml:"prewarm_packages"`
+	} `toml:"nix"`
 }
 
 // Default config file locations (checked in order)
@@ -118,6 +121,14 @@ func run(cmd *cobra.Command, args []string) error {
 		cfg.Storage.WorktreeDir = "/tmp/build-agent/jobs"
 	}
 
+	// Prewarm nix store with common packages
+	if len(cfg.Nix.PrewarmPackages) > 0 {
+		if err := prewarmNix(cfg.Nix.PrewarmPackages); err != nil {
+			// Log warning but don't fail - prewarm is best-effort
+			fmt.Printf("Warning: nix prewarm failed: %v\n", err)
+		}
+	}
+
 	// Create worker
 	worker, err := buildworker.NewWorker(buildworker.WorkerConfig{
 		ServerURL:   cfg.Server.URL,
@@ -172,5 +183,29 @@ After installation, ensure nix is in your PATH:
 		return fmt.Errorf("git is required but not found in PATH")
 	}
 
+	return nil
+}
+
+// prewarmNix downloads packages into the nix store to speed up subsequent nix develop calls
+func prewarmNix(packages []string) error {
+	if len(packages) == 0 {
+		return nil
+	}
+
+	fmt.Printf("Prewarming nix store with %d packages...\n", len(packages))
+
+	// Build args: nix build <pkg1> <pkg2> ... --no-link
+	args := append([]string{"build"}, packages...)
+	args = append(args, "--no-link")
+
+	cmd := exec.Command("nix", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("nix build failed: %w", err)
+	}
+
+	fmt.Println("Nix store prewarm complete")
 	return nil
 }
