@@ -127,34 +127,36 @@ func (d *Dispatcher) Complete(jobID string, result *buildprotocol.JobResult) {
 func (d *Dispatcher) Cancel(jobID string) error {
 	d.mu.Lock()
 	pj, ok := d.pending[jobID]
-	workerID := ""
-	if ok {
-		workerID = pj.WorkerID
-	}
-	d.mu.Unlock()
-
 	if !ok {
+		d.mu.Unlock()
 		return fmt.Errorf("job %s not found", jobID)
 	}
 
-	// If assigned to a worker, send cancel message
-	if workerID != "" && d.cancelFunc != nil {
-		return d.cancelFunc(workerID, jobID)
-	}
+	workerID := pj.WorkerID
 
-	// If still queued, just remove from queue
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	var remaining []*PendingJob
-	for _, q := range d.queue {
-		if q.Job.JobID != jobID {
-			remaining = append(remaining, q)
+	// If still queued (not assigned), remove from queue and pending
+	if workerID == "" {
+		var remaining []*PendingJob
+		for _, q := range d.queue {
+			if q.Job.JobID != jobID {
+				remaining = append(remaining, q)
+			}
 		}
+		d.queue = remaining
+		delete(d.pending, jobID)
+		d.mu.Unlock()
+		return nil
 	}
-	d.queue = remaining
-	delete(d.pending, jobID)
 
-	return nil
+	// Job is assigned to a worker - remove from pending first
+	delete(d.pending, jobID)
+	d.mu.Unlock()
+
+	// Send cancel message to worker
+	if d.cancelFunc == nil {
+		return fmt.Errorf("job %s assigned to worker but no cancelFunc configured", jobID)
+	}
+	return d.cancelFunc(workerID, jobID)
 }
 
 // QueueLength returns the number of queued jobs
