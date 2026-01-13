@@ -292,10 +292,11 @@ func (c *Coordinator) HandleStatus(w http.ResponseWriter, r *http.Request) {
 
 // JobRequest represents an HTTP job submission request
 type JobRequest struct {
-	Command string `json:"command"`
-	Repo    string `json:"repo"`
-	Commit  string `json:"commit"`
-	Timeout int    `json:"timeout,omitempty"`
+	Command   string `json:"command"`
+	Repo      string `json:"repo"`
+	Commit    string `json:"commit"`
+	Timeout   int    `json:"timeout,omitempty"`
+	Verbosity string `json:"verbosity,omitempty"`
 }
 
 // JobResponse represents an HTTP job submission response
@@ -336,8 +337,8 @@ func (c *Coordinator) HandleJobSubmit(w http.ResponseWriter, r *http.Request) {
 		Timeout: req.Timeout,
 	}
 
-	// Submit to dispatcher
-	resultCh := c.dispatcher.Submit(job)
+	// Submit to dispatcher with verbosity
+	resultCh := c.dispatcher.SubmitWithVerbosity(job, req.Verbosity)
 	c.dispatcher.TryDispatch()
 
 	// Wait for result (with timeout)

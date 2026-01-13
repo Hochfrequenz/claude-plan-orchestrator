@@ -3,6 +3,7 @@ package buildpool
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildprotocol"
 )
 
 // newTestCoordinator creates a coordinator with default registry and dispatcher for testing
@@ -609,6 +611,87 @@ func TestCoordinator_CompleteJobVerbosityLevels(t *testing.T) {
 			// stderr should always be present
 			if result.Stderr != "stderr content\n" {
 				t.Errorf("stderr = %q, want %q", result.Stderr, "stderr content\n")
+			}
+		})
+	}
+}
+
+func TestCoordinator_HTTPJobVerbosity(t *testing.T) {
+	registry := NewRegistry()
+
+	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+		return &buildprotocol.JobResult{
+			JobID:    job.JobID,
+			ExitCode: 0,
+			Stdout:   "stdout content",
+			Stderr:   "stderr content",
+		}
+	}
+
+	dispatcher := NewDispatcher(registry, embedded)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleJobSubmit))
+	defer server.Close()
+
+	tests := []struct {
+		name      string
+		body      string
+		expectErr bool
+	}{
+		{
+			name:      "default verbosity (no field)",
+			body:      `{"command":"echo test"}`,
+			expectErr: false,
+		},
+		{
+			name:      "explicit minimal verbosity",
+			body:      `{"command":"echo test","verbosity":"minimal"}`,
+			expectErr: false,
+		},
+		{
+			name:      "explicit normal verbosity",
+			body:      `{"command":"echo test","verbosity":"normal"}`,
+			expectErr: false,
+		},
+		{
+			name:      "explicit full verbosity",
+			body:      `{"command":"echo test","verbosity":"full"}`,
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := http.Post(server.URL, "application/json", strings.NewReader(tt.body))
+			if err != nil {
+				t.Fatalf("POST: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if tt.expectErr {
+				if resp.StatusCode == http.StatusOK {
+					t.Errorf("expected error status, got %d", resp.StatusCode)
+				}
+				return
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("expected status OK, got %d", resp.StatusCode)
+				return
+			}
+
+			var result map[string]interface{}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+
+			// Verify response structure exists
+			if _, ok := result["job_id"]; !ok {
+				t.Error("response missing job_id")
+			}
+			if _, ok := result["exit_code"]; !ok {
+				t.Error("response missing exit_code")
 			}
 		})
 	}
