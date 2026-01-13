@@ -142,3 +142,42 @@ func TestGitDaemon_StartStop(t *testing.T) {
 		t.Errorf("Stop failed: %v", err)
 	}
 }
+
+func TestGitDaemon_ListenAddr(t *testing.T) {
+	tests := []struct {
+		name       string
+		listenAddr string
+		wantInArgs bool
+		wantValue  string
+	}{
+		{"default", "", false, ""},
+		{"localhost", "127.0.0.1", true, "--listen=127.0.0.1"},
+		{"any", "0.0.0.0", true, "--listen=0.0.0.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewGitDaemon(GitDaemonConfig{
+				Port:       9418,
+				BaseDir:    "/tmp",
+				ListenAddr: tt.listenAddr,
+			})
+
+			args := d.Args()
+			found := false
+			for _, arg := range args {
+				if arg == tt.wantValue {
+					found = true
+					break
+				}
+			}
+
+			if tt.wantInArgs && !found {
+				t.Errorf("Args() missing %q", tt.wantValue)
+			}
+			if !tt.wantInArgs && found {
+				t.Errorf("Args() unexpectedly contains listen flag")
+			}
+		})
+	}
+}

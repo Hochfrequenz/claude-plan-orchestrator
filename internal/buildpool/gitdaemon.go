@@ -15,8 +15,9 @@ import (
 
 // GitDaemonConfig configures the git daemon
 type GitDaemonConfig struct {
-	Port    int
-	BaseDir string
+	Port       int
+	BaseDir    string
+	ListenAddr string // Optional: address to listen on (e.g., "127.0.0.1" for local only)
 }
 
 // GitDaemon manages a git daemon process
@@ -36,15 +37,21 @@ func NewGitDaemon(config GitDaemonConfig) *GitDaemon {
 
 // Args returns the command-line arguments for git daemon
 func (d *GitDaemon) Args() []string {
-	return []string{
+	args := []string{
 		"daemon",
 		"--reuseaddr",
 		fmt.Sprintf("--port=%d", d.config.Port),
 		"--base-path", d.config.BaseDir,
 		"--export-all",
 		"--verbose",
-		d.config.BaseDir,
 	}
+
+	if d.config.ListenAddr != "" {
+		args = append(args, fmt.Sprintf("--listen=%s", d.config.ListenAddr))
+	}
+
+	args = append(args, d.config.BaseDir)
+	return args
 }
 
 // Start starts the git daemon
