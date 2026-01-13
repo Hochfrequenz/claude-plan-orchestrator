@@ -1,0 +1,354 @@
+// internal/buildpool/mcp_server.go
+package buildpool
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildprotocol"
+)
+
+// MCPServerConfig configures the MCP server
+type MCPServerConfig struct {
+	WorktreePath string
+}
+
+// MCPServer implements the MCP protocol for build tools
+type MCPServer struct {
+	config     MCPServerConfig
+	dispatcher *Dispatcher
+	repoURL    string
+	commit     string
+}
+
+// MCPTool describes an available tool
+type MCPTool struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	InputSchema map[string]interface{} `json:"inputSchema"`
+}
+
+// NewMCPServer creates a new MCP server
+func NewMCPServer(config MCPServerConfig, dispatcher *Dispatcher) *MCPServer {
+	s := &MCPServer{
+		config:     config,
+		dispatcher: dispatcher,
+	}
+
+	// Get repo URL and commit from worktree
+	s.loadRepoInfo()
+
+	return s
+}
+
+func (s *MCPServer) loadRepoInfo() {
+	// Get current commit
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = s.config.WorktreePath
+	if out, err := cmd.Output(); err == nil {
+		s.commit = strings.TrimSpace(string(out))
+	}
+
+	// Get remote URL
+	cmd = exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = s.config.WorktreePath
+	if out, err := cmd.Output(); err == nil {
+		s.repoURL = strings.TrimSpace(string(out))
+	}
+}
+
+// ListTools returns available tools
+func (s *MCPServer) ListTools() []MCPTool {
+	return []MCPTool{
+		{
+			Name:        "build",
+			Description: "Build the Rust project with cargo",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"release":  map[string]interface{}{"type": "boolean", "description": "Build in release mode"},
+					"features": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"package":  map[string]interface{}{"type": "string", "description": "Specific package to build"},
+				},
+			},
+		},
+		{
+			Name:        "clippy",
+			Description: "Run clippy lints",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"fix":      map[string]interface{}{"type": "boolean", "description": "Apply suggested fixes"},
+					"features": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+				},
+			},
+		},
+		{
+			Name:        "test",
+			Description: "Run tests",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"filter":    map[string]interface{}{"type": "string", "description": "Test name filter"},
+					"package":   map[string]interface{}{"type": "string", "description": "Specific package to test"},
+					"features":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"nocapture": map[string]interface{}{"type": "boolean", "description": "Show stdout/stderr"},
+				},
+			},
+		},
+		{
+			Name:        "run_command",
+			Description: "Run an arbitrary shell command",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"command":      map[string]interface{}{"type": "string", "description": "Command to run"},
+					"timeout_secs": map[string]interface{}{"type": "integer", "description": "Timeout in seconds"},
+				},
+				"required": []string{"command"},
+			},
+		},
+		{
+			Name:        "worker_status",
+			Description: "Get status of connected workers",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+			},
+		},
+	}
+}
+
+func (s *MCPServer) buildCommand(tool string, args map[string]interface{}) string {
+	if args == nil {
+		args = make(map[string]interface{})
+	}
+
+	var parts []string
+
+	switch tool {
+	case "build":
+		parts = []string{"cargo", "build"}
+		if release, ok := args["release"].(bool); ok && release {
+			parts = append(parts, "--release")
+		}
+	case "clippy":
+		parts = []string{"cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"}
+		if fix, ok := args["fix"].(bool); ok && fix {
+			parts = []string{"cargo", "clippy", "--fix", "--all-targets", "--all-features"}
+		}
+	case "test":
+		parts = []string{"cargo", "test"}
+		if filter, ok := args["filter"].(string); ok && filter != "" {
+			parts = append(parts, filter)
+		}
+		if nocapture, ok := args["nocapture"].(bool); ok && nocapture {
+			parts = append(parts, "--", "--nocapture")
+		}
+	}
+
+	// Common args - features
+	if features, ok := args["features"].([]interface{}); ok && len(features) > 0 {
+		featureStrs := make([]string, len(features))
+		for i, f := range features {
+			featureStrs[i] = f.(string)
+		}
+		// Insert before any -- args
+		insertPos := len(parts)
+		for i, p := range parts {
+			if p == "--" {
+				insertPos = i
+				break
+			}
+		}
+		newParts := make([]string, 0, len(parts)+2)
+		newParts = append(newParts, parts[:insertPos]...)
+		newParts = append(newParts, "--features", strings.Join(featureStrs, ","))
+		newParts = append(newParts, parts[insertPos:]...)
+		parts = newParts
+	}
+
+	// Common args - package
+	if pkg, ok := args["package"].(string); ok && pkg != "" {
+		// Insert before any -- args
+		insertPos := len(parts)
+		for i, p := range parts {
+			if p == "--" {
+				insertPos = i
+				break
+			}
+		}
+		newParts := make([]string, 0, len(parts)+2)
+		newParts = append(newParts, parts[:insertPos]...)
+		newParts = append(newParts, "-p", pkg)
+		newParts = append(newParts, parts[insertPos:]...)
+		parts = newParts
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// CallTool executes a tool and returns the result
+func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildprotocol.JobResult, error) {
+	var command string
+	var timeout int
+
+	switch name {
+	case "build", "clippy", "test":
+		command = s.buildCommand(name, args)
+	case "run_command":
+		command = args["command"].(string)
+		if t, ok := args["timeout_secs"].(float64); ok {
+			timeout = int(t)
+		}
+	case "worker_status":
+		// Return worker status without dispatching a job
+		return s.workerStatus()
+	default:
+		return nil, fmt.Errorf("unknown tool: %s", name)
+	}
+
+	// Create job
+	jobID := fmt.Sprintf("mcp-%d", os.Getpid())
+	job := &buildprotocol.JobMessage{
+		JobID:   jobID,
+		Repo:    s.repoURL,
+		Commit:  s.commit,
+		Command: command,
+		Timeout: timeout,
+	}
+
+	// Submit to dispatcher
+	if s.dispatcher == nil {
+		return nil, fmt.Errorf("no dispatcher configured")
+	}
+
+	resultCh := s.dispatcher.Submit(job)
+	s.dispatcher.TryDispatch()
+
+	// Wait for result
+	result := <-resultCh
+
+	// Parse output for test results
+	if name == "test" {
+		result.ParseTestOutput()
+	}
+
+	return result, nil
+}
+
+func (s *MCPServer) workerStatus() (*buildprotocol.JobResult, error) {
+	// This would query the coordinator's registry
+	// For now, return a placeholder
+	status := map[string]interface{}{
+		"workers":               []interface{}{},
+		"queued_jobs":           0,
+		"local_fallback_active": true,
+	}
+
+	output, _ := json.MarshalIndent(status, "", "  ")
+
+	return &buildprotocol.JobResult{
+		JobID:    "status",
+		ExitCode: 0,
+		Output:   string(output),
+	}, nil
+}
+
+// Run starts the MCP server on stdin/stdout
+func (s *MCPServer) Run() error {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read error: %w", err)
+		}
+
+		var request map[string]interface{}
+		if err := json.Unmarshal(line, &request); err != nil {
+			continue
+		}
+
+		response := s.handleRequest(request)
+
+		respBytes, _ := json.Marshal(response)
+		fmt.Println(string(respBytes))
+	}
+}
+
+func (s *MCPServer) handleRequest(req map[string]interface{}) map[string]interface{} {
+	method, _ := req["method"].(string)
+	id, _ := req["id"].(float64)
+
+	switch method {
+	case "initialize":
+		return map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"result": map[string]interface{}{
+				"protocolVersion": "2024-11-05",
+				"capabilities": map[string]interface{}{
+					"tools": map[string]interface{}{},
+				},
+				"serverInfo": map[string]interface{}{
+					"name":    "build-pool",
+					"version": "1.0.0",
+				},
+			},
+		}
+
+	case "tools/list":
+		return map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"result": map[string]interface{}{
+				"tools": s.ListTools(),
+			},
+		}
+
+	case "tools/call":
+		params, _ := req["params"].(map[string]interface{})
+		name, _ := params["name"].(string)
+		args, _ := params["arguments"].(map[string]interface{})
+
+		result, err := s.CallTool(name, args)
+		if err != nil {
+			return map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"error": map[string]interface{}{
+					"code":    -32000,
+					"message": err.Error(),
+				},
+			}
+		}
+
+		return map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"result": map[string]interface{}{
+				"content": []map[string]interface{}{
+					{"type": "text", "text": result.Output},
+				},
+			},
+		}
+
+	default:
+		return map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"error": map[string]interface{}{
+				"code":    -32601,
+				"message": "method not found",
+			},
+		}
+	}
+}

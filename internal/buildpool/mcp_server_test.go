@@ -1,0 +1,327 @@
+// internal/buildpool/mcp_server_test.go
+package buildpool
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestMCPServer_ToolsList(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	tools := server.ListTools()
+
+	expectedTools := []string{"build", "clippy", "test", "run_command", "worker_status"}
+
+	if len(tools) != len(expectedTools) {
+		t.Errorf("got %d tools, want %d", len(tools), len(expectedTools))
+	}
+
+	toolNames := make(map[string]bool)
+	for _, tool := range tools {
+		toolNames[tool.Name] = true
+	}
+
+	for _, name := range expectedTools {
+		if !toolNames[name] {
+			t.Errorf("missing tool: %s", name)
+		}
+	}
+}
+
+func TestMCPServer_BuildCommandArgs(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	tests := []struct {
+		name     string
+		args     map[string]interface{}
+		expected string
+	}{
+		{
+			name:     "default build",
+			args:     nil,
+			expected: "cargo build",
+		},
+		{
+			name:     "release build",
+			args:     map[string]interface{}{"release": true},
+			expected: "cargo build --release",
+		},
+		{
+			name:     "with features",
+			args:     map[string]interface{}{"features": []interface{}{"foo", "bar"}},
+			expected: "cargo build --features foo,bar",
+		},
+		{
+			name:     "specific package",
+			args:     map[string]interface{}{"package": "mylib"},
+			expected: "cargo build -p mylib",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := server.buildCommand("build", tt.args)
+			if cmd != tt.expected {
+				t.Errorf("got %q, want %q", cmd, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMCPServer_ClippyCommandArgs(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	tests := []struct {
+		name     string
+		args     map[string]interface{}
+		expected string
+	}{
+		{
+			name:     "default clippy",
+			args:     nil,
+			expected: "cargo clippy --all-targets --all-features -- -D warnings",
+		},
+		{
+			name:     "clippy with fix",
+			args:     map[string]interface{}{"fix": true},
+			expected: "cargo clippy --fix --all-targets --all-features",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := server.buildCommand("clippy", tt.args)
+			if cmd != tt.expected {
+				t.Errorf("got %q, want %q", cmd, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMCPServer_TestCommandArgs(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	tests := []struct {
+		name     string
+		args     map[string]interface{}
+		expected string
+	}{
+		{
+			name:     "default test",
+			args:     nil,
+			expected: "cargo test",
+		},
+		{
+			name:     "test with filter",
+			args:     map[string]interface{}{"filter": "my_test"},
+			expected: "cargo test my_test",
+		},
+		{
+			name:     "test with nocapture",
+			args:     map[string]interface{}{"nocapture": true},
+			expected: "cargo test -- --nocapture",
+		},
+		{
+			name:     "test with package",
+			args:     map[string]interface{}{"package": "mylib"},
+			expected: "cargo test -p mylib",
+		},
+		{
+			name:     "test with features",
+			args:     map[string]interface{}{"features": []interface{}{"feature1"}},
+			expected: "cargo test --features feature1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := server.buildCommand("test", tt.args)
+			if cmd != tt.expected {
+				t.Errorf("got %q, want %q", cmd, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMCPServer_HandleRequest_Initialize(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      float64(1),
+		"method":  "initialize",
+	}
+
+	resp := server.handleRequest(req)
+
+	if resp["jsonrpc"] != "2.0" {
+		t.Errorf("expected jsonrpc 2.0, got %v", resp["jsonrpc"])
+	}
+
+	if resp["id"] != float64(1) {
+		t.Errorf("expected id 1, got %v", resp["id"])
+	}
+
+	result, ok := resp["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result to be a map")
+	}
+
+	if result["protocolVersion"] != "2024-11-05" {
+		t.Errorf("expected protocol version 2024-11-05, got %v", result["protocolVersion"])
+	}
+
+	serverInfo, ok := result["serverInfo"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected serverInfo to be a map")
+	}
+
+	if serverInfo["name"] != "build-pool" {
+		t.Errorf("expected server name build-pool, got %v", serverInfo["name"])
+	}
+}
+
+func TestMCPServer_HandleRequest_ToolsList(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      float64(2),
+		"method":  "tools/list",
+	}
+
+	resp := server.handleRequest(req)
+
+	if resp["id"] != float64(2) {
+		t.Errorf("expected id 2, got %v", resp["id"])
+	}
+
+	result, ok := resp["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result to be a map")
+	}
+
+	tools, ok := result["tools"].([]MCPTool)
+	if !ok {
+		t.Fatalf("expected tools to be []MCPTool")
+	}
+
+	if len(tools) != 5 {
+		t.Errorf("expected 5 tools, got %d", len(tools))
+	}
+}
+
+func TestMCPServer_HandleRequest_UnknownMethod(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      float64(3),
+		"method":  "unknown/method",
+	}
+
+	resp := server.handleRequest(req)
+
+	errResp, ok := resp["error"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected error response")
+	}
+
+	if errResp["code"] != -32601 {
+		t.Errorf("expected error code -32601, got %v", errResp["code"])
+	}
+}
+
+func TestMCPServer_WorkerStatus(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	result, err := server.workerStatus()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+
+	// Verify output is valid JSON
+	var status map[string]interface{}
+	if err := json.Unmarshal([]byte(result.Output), &status); err != nil {
+		t.Errorf("output should be valid JSON: %v", err)
+	}
+
+	if _, ok := status["workers"]; !ok {
+		t.Error("expected workers field in status")
+	}
+}
+
+func TestMCPServer_CallTool_NoDispatcher(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	_, err := server.CallTool("build", nil)
+	if err == nil {
+		t.Error("expected error when no dispatcher configured")
+	}
+
+	if err.Error() != "no dispatcher configured" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCPServer_CallTool_UnknownTool(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	_, err := server.CallTool("unknown_tool", nil)
+	if err == nil {
+		t.Error("expected error for unknown tool")
+	}
+
+	if err.Error() != "unknown tool: unknown_tool" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCPServer_ToolSchema(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil)
+
+	tools := server.ListTools()
+
+	// Verify each tool has required fields
+	for _, tool := range tools {
+		if tool.Name == "" {
+			t.Error("tool should have a name")
+		}
+		if tool.Description == "" {
+			t.Errorf("tool %s should have a description", tool.Name)
+		}
+		if tool.InputSchema == nil {
+			t.Errorf("tool %s should have an input schema", tool.Name)
+		}
+		if tool.InputSchema["type"] != "object" {
+			t.Errorf("tool %s schema type should be object", tool.Name)
+		}
+	}
+}
