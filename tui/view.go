@@ -1070,15 +1070,19 @@ func (m Model) renderModules() string {
 }
 
 func (m Model) renderWorkers() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("WORKERS"))
+	b.WriteString("\n")
+
 	if len(m.workers) == 0 {
-		return "No workers connected (using local fallback)"
+		b.WriteString(queuedStyle.Render("  No workers connected (using local fallback)"))
+		return b.String()
 	}
 
-	var sb strings.Builder
-	sb.WriteString("Workers:\n")
 	for _, w := range m.workers {
-		sb.WriteString(fmt.Sprintf("  %s: %d/%d jobs\n",
-			w.ID, w.ActiveJobs, w.MaxJobs))
+		b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s: %d/%d jobs",
+			w.ID, w.ActiveJobs, w.MaxJobs)))
+		b.WriteString("\n")
 	}
-	return sb.String()
+	return strings.TrimSuffix(b.String(), "\n")
 }
