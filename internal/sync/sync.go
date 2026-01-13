@@ -3,6 +3,7 @@ package sync
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -160,4 +161,65 @@ func (s *Syncer) UpdateEpicFrontmatter(epicPath string, status domain.TaskStatus
 	}
 
 	return os.WriteFile(epicPath, []byte(frontmatter+rest), 0644)
+}
+
+// projectRoot returns the project root directory (parent of docs/plans)
+func (s *Syncer) projectRoot() string {
+	return filepath.Dir(filepath.Dir(s.plansDir))
+}
+
+// GitPull pulls the latest changes from the remote
+func (s *Syncer) GitPull() error {
+	cmd := exec.Command("git", "pull", "--rebase")
+	cmd.Dir = s.projectRoot()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git pull failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+// GitCommitAndPush commits and pushes the README and epic status changes
+func (s *Syncer) GitCommitAndPush(taskID domain.TaskID, status domain.TaskStatus) error {
+	root := s.projectRoot()
+
+	// Stage only the README.md in docs/plans
+	readmePath := filepath.Join(s.plansDir, "README.md")
+	relReadme, _ := filepath.Rel(root, readmePath)
+
+	cmd := exec.Command("git", "add", relReadme)
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add failed: %w\n%s", err, output)
+	}
+
+	// Check if there are staged changes
+	cmd = exec.Command("git", "diff", "--cached", "--quiet")
+	cmd.Dir = root
+	if err := cmd.Run(); err == nil {
+		// No changes staged, nothing to commit
+		return nil
+	}
+
+	// Commit
+	statusStr := "in_progress"
+	if status == domain.StatusComplete {
+		statusStr = "complete"
+	}
+	commitMsg := fmt.Sprintf("chore: update %s status to %s", taskID.String(), statusStr)
+
+	cmd = exec.Command("git", "commit", "-m", commitMsg)
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %w\n%s", err, output)
+	}
+
+	// Push
+	cmd = exec.Command("git", "push")
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git push failed: %w\n%s", err, output)
+	}
+
+	return nil
 }

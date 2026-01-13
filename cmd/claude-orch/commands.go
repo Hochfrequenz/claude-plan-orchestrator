@@ -18,6 +18,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/skills"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
 	"github.com/hochfrequenz/claude-plan-orchestrator/tui"
 	"github.com/hochfrequenz/claude-plan-orchestrator/web/api"
@@ -322,6 +323,11 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	agentMgr := executor.NewAgentManager(cfg.General.MaxParallelAgents)
 	agentStoreAdp := &agentStoreAdapter{store: store}
 	agentMgr.SetStore(agentStoreAdp)
+
+	// Create syncer for updating README and epic status on completion
+	plansDir := cfg.General.ProjectRoot + "/docs/plans"
+	syncer := sync.New(plansDir)
+	agentMgr.SetSyncer(syncer)
 
 	// Recover any agents that were running before
 	ctx, cancel := context.WithCancel(context.Background())
