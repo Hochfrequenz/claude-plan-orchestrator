@@ -78,6 +78,19 @@ func (d *GitDaemon) Start(ctx context.Context) error {
 		return fmt.Errorf("starting git daemon: %w", err)
 	}
 
+	// Give the daemon a moment to start and verify it's still running
+	time.Sleep(100 * time.Millisecond)
+
+	// Check if process exited immediately (indicates startup failure)
+	if d.cmd.Process != nil {
+		// Try to check if process is still alive
+		if err := d.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+			// Process died - try to get exit status
+			d.cmd.Wait()
+			return fmt.Errorf("git daemon exited immediately after start")
+		}
+	}
+
 	log.Printf("git daemon started on port %d, serving %s", d.config.Port, d.config.BaseDir)
 	return nil
 }
