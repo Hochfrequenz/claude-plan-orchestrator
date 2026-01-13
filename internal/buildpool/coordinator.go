@@ -210,6 +210,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", c.HandleWebSocket)
 	mux.HandleFunc("/status", c.HandleStatus)
+	mux.HandleFunc("/job", c.HandleJobSubmit)
 
 	addr := fmt.Sprintf(":%d", c.config.WebSocketPort)
 	c.server = &http.Server{
@@ -244,6 +245,76 @@ func (c *Coordinator) HandleStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+// JobRequest represents an HTTP job submission request
+type JobRequest struct {
+	Command string `json:"command"`
+	Repo    string `json:"repo"`
+	Commit  string `json:"commit"`
+	Timeout int    `json:"timeout,omitempty"`
+}
+
+// JobResponse represents an HTTP job submission response
+type JobResponse struct {
+	JobID    string `json:"job_id"`
+	ExitCode int    `json:"exit_code"`
+	Output   string `json:"output"`
+	Error    string `json:"error,omitempty"`
+}
+
+// HandleJobSubmit handles HTTP job submissions (POST /job)
+func (c *Coordinator) HandleJobSubmit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req JobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Command == "" {
+		http.Error(w, "command is required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate job ID
+	jobID := fmt.Sprintf("http-%d", time.Now().UnixNano())
+
+	// Create job
+	job := &buildprotocol.JobMessage{
+		JobID:   jobID,
+		Repo:    req.Repo,
+		Commit:  req.Commit,
+		Command: req.Command,
+		Timeout: req.Timeout,
+	}
+
+	// Submit to dispatcher
+	resultCh := c.dispatcher.Submit(job)
+	c.dispatcher.TryDispatch()
+
+	// Wait for result (with timeout)
+	timeout := time.Duration(req.Timeout) * time.Second
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+
+	select {
+	case result := <-resultCh:
+		resp := JobResponse{
+			JobID:    result.JobID,
+			ExitCode: result.ExitCode,
+			Output:   result.Output,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	case <-time.After(timeout):
+		http.Error(w, "job timed out", http.StatusGatewayTimeout)
+	}
 }
 
 // Stop stops the coordinator server

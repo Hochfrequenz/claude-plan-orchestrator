@@ -260,15 +260,24 @@ func (a *Agent) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
 
-	// Build claude command with prompt as argument
-	a.cmd = exec.CommandContext(ctx, "claude",
+	// Build claude command arguments
+	args := []string{
 		"--print",                        // Non-interactive mode
 		"--verbose",                      // Required for stream-json output
 		"--dangerously-skip-permissions", // Skip permission prompts
 		"--output-format", "stream-json", // Stream output as JSON for realtime updates
 		"--session-id", a.SessionID,      // Named session for resume capability
-		"-p", a.Prompt,                   // Pass prompt as argument
-	)
+	}
+
+	// Add MCP config if build-mcp binary is available
+	if mcpConfig := a.generateMCPConfig(); mcpConfig != "" {
+		args = append(args, "--mcp-config", mcpConfig)
+	}
+
+	// Add prompt
+	args = append(args, "-p", a.Prompt)
+
+	a.cmd = exec.CommandContext(ctx, "claude", args...)
 	a.cmd.Dir = a.WorktreePath
 
 	// Capture output
@@ -605,6 +614,38 @@ func (a *Agent) GetUsage() (int, int, float64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.TokensInput, a.TokensOutput, a.CostUSD
+}
+
+// generateMCPConfig creates an MCP config for the build-pool server if available
+// Returns the config as a JSON string, or empty string if build-mcp is not available
+func (a *Agent) generateMCPConfig() string {
+	// Check if build-mcp binary is in PATH
+	buildMCPPath, err := exec.LookPath("build-mcp")
+	if err != nil {
+		// build-mcp not installed, skip MCP config
+		return ""
+	}
+
+	// Generate MCP config JSON
+	// The config format is: {"mcpServers": {"name": {"command": "...", "args": [...]}}}
+	config := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"build-pool": map[string]interface{}{
+				"command": buildMCPPath,
+				"args":    []string{},
+				"env": map[string]string{
+					"BUILD_POOL_URL": "http://localhost:8081",
+				},
+			},
+		},
+	}
+
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return ""
+	}
+
+	return string(configJSON)
 }
 
 // Duration returns how long the agent has been running

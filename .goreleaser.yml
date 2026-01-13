@@ -46,6 +46,20 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
+  - id: build-mcp
+    main: ./cmd/build-mcp
+    binary: build-mcp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
 archives:
   - id: claude-orch
     ids:
@@ -72,6 +86,18 @@ archives:
       - README.md
       - LICENSE*
       - nix/build-agent.nix
+
+  - id: build-mcp
+    ids:
+      - build-mcp
+    name_template: >-
+      build-mcp_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE*
 
 checksum:
   name_template: 'checksums.txt'
