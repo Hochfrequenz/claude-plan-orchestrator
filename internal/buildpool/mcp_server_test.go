@@ -14,7 +14,7 @@ func TestMCPServer_ToolsList(t *testing.T) {
 
 	tools := server.ListTools()
 
-	expectedTools := []string{"build", "clippy", "test", "run_command", "worker_status"}
+	expectedTools := []string{"build", "clippy", "test", "run_command", "worker_status", "get_job_logs"}
 
 	if len(tools) != len(expectedTools) {
 		t.Errorf("got %d tools, want %d", len(tools), len(expectedTools))
@@ -220,8 +220,8 @@ func TestMCPServer_HandleRequest_ToolsList(t *testing.T) {
 		t.Fatalf("expected tools to be []MCPTool")
 	}
 
-	if len(tools) != 5 {
-		t.Errorf("expected 5 tools, got %d", len(tools))
+	if len(tools) != 6 {
+		t.Errorf("expected 6 tools, got %d", len(tools))
 	}
 }
 
@@ -408,6 +408,86 @@ func TestMCPServer_WorkerStatus_ReturnsRealData(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, `"max_jobs": 4`) {
 		t.Errorf("output missing max_jobs: %s", result.Output)
+	}
+}
+
+func TestMCPServer_GetJobLogsTool(t *testing.T) {
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: "/tmp/test-worktree",
+	}, nil, nil)
+
+	tools := server.ListTools()
+
+	var found bool
+	for _, tool := range tools {
+		if tool.Name == "get_job_logs" {
+			found = true
+			props := tool.InputSchema["properties"].(map[string]interface{})
+			if _, ok := props["job_id"]; !ok {
+				t.Error("get_job_logs missing job_id property")
+			}
+			if _, ok := props["stream"]; !ok {
+				t.Error("get_job_logs missing stream property")
+			}
+			required := tool.InputSchema["required"].([]string)
+			if len(required) != 1 || required[0] != "job_id" {
+				t.Errorf("get_job_logs required = %v, want [job_id]", required)
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Error("get_job_logs tool not found")
+	}
+}
+
+func TestMCPServer_GetJobLogsExecution(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	server := NewMCPServer(MCPServerConfig{WorktreePath: "."}, dispatcher, registry)
+	server.SetCoordinator(coord)
+
+	// Simulate a completed job with retained logs
+	coord.AccumulateOutput("test-job-logs", "stdout", "stdout content")
+	coord.AccumulateOutput("test-job-logs", "stderr", "stderr content")
+	coord.RetainLogs("test-job-logs")
+
+	// Call get_job_logs
+	result, err := server.CallTool("get_job_logs", map[string]interface{}{
+		"job_id": "test-job-logs",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	if !strings.Contains(result.Output, "stdout content") {
+		t.Errorf("output missing stdout: %s", result.Output)
+	}
+	if !strings.Contains(result.Output, "stderr content") {
+		t.Errorf("output missing stderr: %s", result.Output)
+	}
+}
+
+func TestMCPServer_GetJobLogsNotFound(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	server := NewMCPServer(MCPServerConfig{WorktreePath: "."}, dispatcher, registry)
+	server.SetCoordinator(coord)
+
+	result, err := server.CallTool("get_job_logs", map[string]interface{}{
+		"job_id": "nonexistent",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	if result.ExitCode != 1 {
+		t.Errorf("exit code = %d, want 1 for not found", result.ExitCode)
 	}
 }
 

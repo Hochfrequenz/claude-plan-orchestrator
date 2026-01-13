@@ -23,11 +23,12 @@ type MCPServerConfig struct {
 
 // MCPServer implements the MCP protocol for build tools
 type MCPServer struct {
-	config     MCPServerConfig
-	dispatcher *Dispatcher
-	registry   *Registry
-	repoURL    string
-	commit     string
+	config      MCPServerConfig
+	dispatcher  *Dispatcher
+	registry    *Registry
+	coordinator *Coordinator
+	repoURL     string
+	commit      string
 }
 
 // MCPTool describes an available tool
@@ -57,6 +58,11 @@ func NewMCPServer(config MCPServerConfig, dispatcher *Dispatcher, registry *Regi
 	s.loadRepoInfo()
 
 	return s
+}
+
+// SetCoordinator sets the coordinator for log retrieval
+func (s *MCPServer) SetCoordinator(c *Coordinator) {
+	s.coordinator = c
 }
 
 func randomJobSuffix() string {
@@ -141,6 +147,26 @@ func (s *MCPServer) ListTools() []MCPTool {
 			Description: "Get status of connected workers",
 			InputSchema: map[string]interface{}{
 				"type": "object",
+			},
+		},
+		{
+			Name:        "get_job_logs",
+			Description: "Retrieve complete logs for a completed job from retention buffer",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"job_id": map[string]interface{}{
+						"type":        "string",
+						"description": "The job ID to retrieve logs for",
+					},
+					"stream": map[string]interface{}{
+						"type":        "string",
+						"description": "Which stream to retrieve: stdout, stderr, or both (default: both)",
+						"enum":        []string{"stdout", "stderr", "both"},
+						"default":     "both",
+					},
+				},
+				"required": []string{"job_id"},
 			},
 		},
 	}
@@ -240,6 +266,9 @@ func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildpr
 	case "worker_status":
 		// Return worker status without dispatching a job
 		return s.workerStatus()
+	case "get_job_logs":
+		// Retrieve logs from retention buffer
+		return s.getJobLogs(args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -305,6 +334,58 @@ func (s *MCPServer) workerStatus() (*buildprotocol.JobResult, error) {
 		JobID:    "status",
 		ExitCode: 0,
 		Output:   string(output),
+	}, nil
+}
+
+func (s *MCPServer) getJobLogs(args map[string]interface{}) (*buildprotocol.JobResult, error) {
+	jobID, _ := args["job_id"].(string)
+	if jobID == "" {
+		return &buildprotocol.JobResult{
+			ExitCode: 1,
+			Output:   "job_id is required",
+		}, nil
+	}
+
+	if s.coordinator == nil {
+		return &buildprotocol.JobResult{
+			ExitCode: 1,
+			Output:   "no coordinator configured for log retrieval",
+		}, nil
+	}
+
+	stdout, stderr, found := s.coordinator.GetRetainedLogs(jobID)
+	if !found {
+		return &buildprotocol.JobResult{
+			ExitCode: 1,
+			Output:   fmt.Sprintf("logs not found for job %s", jobID),
+		}, nil
+	}
+
+	// Filter by stream if specified
+	stream, _ := args["stream"].(string)
+	if stream == "" {
+		stream = "both"
+	}
+
+	var output string
+	switch stream {
+	case "stdout":
+		output = stdout
+	case "stderr":
+		output = stderr
+	default: // "both"
+		result := map[string]string{
+			"stdout": stdout,
+			"stderr": stderr,
+		}
+		outputBytes, _ := json.MarshalIndent(result, "", "  ")
+		output = string(outputBytes)
+	}
+
+	return &buildprotocol.JobResult{
+		JobID:    jobID,
+		ExitCode: 0,
+		Output:   output,
 	}, nil
 }
 
