@@ -2,7 +2,11 @@
 // in the distributed build system. Messages flow over WebSocket connections.
 package buildprotocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"regexp"
+	"strconv"
+)
 
 // Envelope wraps all messages with a type discriminator.
 // When marshaling, Payload can be any message struct.
@@ -86,3 +90,32 @@ const (
 	TypePing     = "ping"
 	TypePong     = "pong"
 )
+
+// JobResult is the complete result returned to MCP callers
+type JobResult struct {
+	JobID        string  `json:"job_id"`
+	ExitCode     int     `json:"exit_code"`
+	Output       string  `json:"output"`
+	DurationSecs float64 `json:"duration_secs"`
+
+	// Parsed from test output (optional)
+	TestsPassed  int `json:"tests_passed,omitempty"`
+	TestsFailed  int `json:"tests_failed,omitempty"`
+	TestsIgnored int `json:"tests_ignored,omitempty"`
+
+	// Parsed from clippy output (optional)
+	ClippyWarnings int `json:"clippy_warnings,omitempty"`
+	ClippyErrors   int `json:"clippy_errors,omitempty"`
+}
+
+var testResultRegex = regexp.MustCompile(`(\d+) passed; (\d+) failed; (\d+) ignored`)
+
+// ParseTestOutput extracts test counts from cargo test output
+func (r *JobResult) ParseTestOutput() {
+	matches := testResultRegex.FindStringSubmatch(r.Output)
+	if len(matches) == 4 {
+		r.TestsPassed, _ = strconv.Atoi(matches[1])
+		r.TestsFailed, _ = strconv.Atoi(matches[2])
+		r.TestsIgnored, _ = strconv.Atoi(matches[3])
+	}
+}

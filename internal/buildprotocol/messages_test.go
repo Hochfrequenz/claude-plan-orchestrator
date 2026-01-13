@@ -44,3 +44,31 @@ func TestJobMessage_Marshal(t *testing.T) {
 		t.Error("expected non-empty JSON")
 	}
 }
+
+func TestJobResult_ParseTestOutput(t *testing.T) {
+	output := `running 5 tests
+test test_one ... ok
+test test_two ... ok
+test test_three ... FAILED
+test test_four ... ok
+test test_five ... ignored
+
+test result: FAILED. 3 passed; 1 failed; 1 ignored`
+
+	result := JobResult{
+		ExitCode: 1,
+		Output:   output,
+	}
+
+	result.ParseTestOutput()
+
+	if result.TestsPassed != 3 {
+		t.Errorf("got passed=%d, want 3", result.TestsPassed)
+	}
+	if result.TestsFailed != 1 {
+		t.Errorf("got failed=%d, want 1", result.TestsFailed)
+	}
+	if result.TestsIgnored != 1 {
+		t.Errorf("got ignored=%d, want 1", result.TestsIgnored)
+	}
+}
