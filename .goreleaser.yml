@@ -48,7 +48,7 @@ builds:
 
 archives:
   - id: claude-orch
-    builds:
+    ids:
       - claude-orch
     name_template: >-
       claude-orch_
@@ -61,7 +61,7 @@ archives:
       - scripts/onboard.sh
 
   - id: build-agent
-    builds:
+    ids:
       - build-agent
     name_template: >-
       build-agent_
