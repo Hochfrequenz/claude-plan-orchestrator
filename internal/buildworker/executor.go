@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,7 @@ type ExecutorConfig struct {
 	GitCacheDir string
 	WorktreeDir string
 	UseNixShell bool
+	Debug       bool
 }
 
 // Executor runs jobs in isolated worktrees
@@ -52,14 +54,25 @@ func NewExecutor(config ExecutorConfig) *Executor {
 func (e *Executor) RunJob(ctx context.Context, job Job, onOutput OutputCallback) (*buildprotocol.JobResult, error) {
 	start := time.Now()
 
+	if e.config.Debug {
+		log.Printf("[executor] starting job %s: repo=%s commit=%s command=%q",
+			job.ID, job.Repo, job.Commit, job.Command)
+	}
+
 	var wtPath string
 	var err error
 
 	// Only create worktree if a repo is specified
 	if job.Repo != "" {
+		if e.config.Debug {
+			log.Printf("[executor] creating worktree for job %s from %s@%s", job.ID, job.Repo, job.Commit)
+		}
 		wtPath, err = e.createWorktree(job.ID, job.Repo, job.Commit)
 		if err != nil {
 			return nil, fmt.Errorf("creating worktree: %w", err)
+		}
+		if e.config.Debug {
+			log.Printf("[executor] worktree created at %s", wtPath)
 		}
 		defer e.removeWorktree(job.Repo, wtPath)
 	} else {
@@ -72,14 +85,23 @@ func (e *Executor) RunJob(ctx context.Context, job Job, onOutput OutputCallback)
 		if err != nil {
 			return nil, fmt.Errorf("creating temp dir: %w", err)
 		}
+		if e.config.Debug {
+			log.Printf("[executor] temp dir created at %s (no repo)", wtPath)
+		}
 		defer os.RemoveAll(wtPath)
 	}
 
 	// Build command
 	var cmd *exec.Cmd
 	if e.config.UseNixShell {
+		if e.config.Debug {
+			log.Printf("[executor] running with nix develop: nix develop --command sh -c %q", job.Command)
+		}
 		cmd = exec.CommandContext(ctx, "nix", "develop", "--command", "sh", "-c", job.Command)
 	} else {
+		if e.config.Debug {
+			log.Printf("[executor] running directly: sh -c %q", job.Command)
+		}
 		cmd = exec.CommandContext(ctx, "sh", "-c", job.Command)
 	}
 	cmd.Dir = wtPath
@@ -96,8 +118,14 @@ func (e *Executor) RunJob(ctx context.Context, job Job, onOutput OutputCallback)
 
 	var output strings.Builder
 
+	if e.config.Debug {
+		log.Printf("[executor] starting command in %s", wtPath)
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting command: %w", err)
+	}
+	if e.config.Debug {
+		log.Printf("[executor] command started with PID %d", cmd.Process.Pid)
 	}
 
 	// Stream output
@@ -114,17 +142,28 @@ func (e *Executor) RunJob(ctx context.Context, job Job, onOutput OutputCallback)
 	<-done
 	<-done
 
+	if e.config.Debug {
+		log.Printf("[executor] waiting for command to complete...")
+	}
 	err = cmd.Wait()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
+			if e.config.Debug {
+				log.Printf("[executor] command exited with code %d", exitCode)
+			}
 		} else {
 			return nil, fmt.Errorf("command failed: %w", err)
 		}
+	} else if e.config.Debug {
+		log.Printf("[executor] command completed successfully")
 	}
 
 	duration := time.Since(start)
+	if e.config.Debug {
+		log.Printf("[executor] job %s finished in %.2fs with exit code %d", job.ID, duration.Seconds(), exitCode)
+	}
 
 	return &buildprotocol.JobResult{
 		JobID:        job.ID,
@@ -145,6 +184,9 @@ func (e *Executor) createWorktree(jobID, repo, commit string) (string, error) {
 
 	// For local repos (testing), just create worktree directly
 	if !strings.HasPrefix(repo, "git://") && !strings.HasPrefix(repo, "https://") {
+		if e.config.Debug {
+			log.Printf("[executor] local repo detected, creating worktree directly from %s", repo)
+		}
 		cmd := exec.Command("git", "worktree", "add", "--detach", wtPath, commit)
 		cmd.Dir = repo
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -155,16 +197,31 @@ func (e *Executor) createWorktree(jobID, repo, commit string) (string, error) {
 
 	// For remote repos, fetch into git cache directory
 	// First ensure git cache dir exists and is a git repo
+	if e.config.Debug {
+		log.Printf("[executor] remote repo detected, initializing git cache")
+	}
 	if err := e.ensureGitCacheDir(); err != nil {
 		return "", fmt.Errorf("git cache init: %w", err)
 	}
+	if e.config.Debug {
+		log.Printf("[executor] git cache dir: %s", e.config.GitCacheDir)
+	}
 
+	if e.config.Debug {
+		log.Printf("[executor] fetching: git fetch %s %s", repo, commit)
+	}
 	cmd := exec.Command("git", "fetch", repo, commit)
 	cmd.Dir = e.config.GitCacheDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git fetch: %s: %w", out, err)
 	}
+	if e.config.Debug {
+		log.Printf("[executor] fetch completed successfully")
+	}
 
+	if e.config.Debug {
+		log.Printf("[executor] creating worktree at %s from FETCH_HEAD", wtPath)
+	}
 	cmd = exec.Command("git", "worktree", "add", "--detach", wtPath, "FETCH_HEAD")
 	cmd.Dir = e.config.GitCacheDir
 	if out, err := cmd.CombinedOutput(); err != nil {

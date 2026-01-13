@@ -86,6 +86,7 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 			GitCacheDir: config.GitCacheDir,
 			WorktreeDir: config.WorktreeDir,
 			UseNixShell: config.UseNixShell,
+			Debug:       config.Debug,
 		}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -189,7 +190,15 @@ func (w *Worker) Run() error {
 }
 
 func (w *Worker) handleJob(jobMsg buildprotocol.JobMessage) {
+	if w.config.Debug {
+		log.Printf("[worker] received job %s: command=%q repo=%s commit=%s timeout=%ds",
+			jobMsg.JobID, jobMsg.Command, jobMsg.Repo, jobMsg.Commit, jobMsg.Timeout)
+	}
+
 	if !w.pool.Acquire() {
+		if w.config.Debug {
+			log.Printf("[worker] job %s rejected: no slots available", jobMsg.JobID)
+		}
 		w.send(buildprotocol.TypeError, buildprotocol.ErrorMessage{
 			JobID:   jobMsg.JobID,
 			Message: "no slots available",
@@ -205,6 +214,10 @@ func (w *Worker) handleJob(jobMsg buildprotocol.JobMessage) {
 	timeout := time.Duration(jobMsg.Timeout) * time.Second
 	if timeout == 0 {
 		timeout = 5 * time.Minute
+	}
+
+	if w.config.Debug {
+		log.Printf("[worker] starting job %s with timeout %v", jobMsg.JobID, timeout)
 	}
 
 	ctx, cancel := context.WithTimeout(w.ctx, timeout)
@@ -231,6 +244,9 @@ func (w *Worker) handleJob(jobMsg buildprotocol.JobMessage) {
 	})
 
 	if err != nil {
+		if w.config.Debug {
+			log.Printf("[worker] job %s failed with error: %v", jobMsg.JobID, err)
+		}
 		w.send(buildprotocol.TypeError, buildprotocol.ErrorMessage{
 			JobID:   jobMsg.JobID,
 			Message: err.Error(),
@@ -238,6 +254,10 @@ func (w *Worker) handleJob(jobMsg buildprotocol.JobMessage) {
 		return
 	}
 
+	if w.config.Debug {
+		log.Printf("[worker] job %s completed: exit_code=%d duration=%.2fs",
+			jobMsg.JobID, result.ExitCode, result.DurationSecs)
+	}
 	w.send(buildprotocol.TypeComplete, buildprotocol.CompleteMessage{
 		JobID:      jobMsg.JobID,
 		ExitCode:   result.ExitCode,
