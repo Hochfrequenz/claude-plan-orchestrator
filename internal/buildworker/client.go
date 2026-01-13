@@ -143,6 +143,7 @@ func (w *Worker) handleJob(jobMsg buildprotocol.JobMessage) {
 	}
 	defer func() {
 		w.pool.Release()
+		w.UntrackJob(jobMsg.JobID)
 		w.sendReady()
 	}()
 
@@ -153,6 +154,9 @@ func (w *Worker) handleJob(jobMsg buildprotocol.JobMessage) {
 
 	ctx, cancel := context.WithTimeout(w.ctx, timeout)
 	defer cancel()
+
+	// Track this job for cancellation
+	w.TrackJob(jobMsg.JobID, cancel)
 
 	job := Job{
 		ID:      jobMsg.JobID,
