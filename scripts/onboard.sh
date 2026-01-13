@@ -189,7 +189,7 @@ database_path = "${DB_PATH}"
 
 [claude]
 # Claude model to use
-model = "claude-sonnet-4-20250514"
+model = "claude-opus-4-5-20251101"
 
 # Max tokens per response
 max_tokens = 16000

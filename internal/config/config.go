@@ -78,7 +78,7 @@ func Default() *Config {
 			DatabasePath:      filepath.Join(home, ".claude-orchestrator", "orchestrator.db"),
 		},
 		Claude: ClaudeConfig{
-			Model:     "claude-sonnet-4-20250514",
+			Model:     "claude-opus-4-5-20251101",
 			MaxTokens: 16000,
 		},
 		Notifications: NotificationsConfig{

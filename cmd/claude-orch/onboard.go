@@ -162,7 +162,7 @@ max_parallel_agents = %d
 database_path = %q
 
 [claude]
-model = "claude-sonnet-4-20250514"
+model = "claude-opus-4-5-20251101"
 max_tokens = 16000
 
 [notifications]
