@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildprotocol"
 )
 
 func TestMCPServer_ToolsList(t *testing.T) {
@@ -488,6 +490,172 @@ func TestMCPServer_GetJobLogsNotFound(t *testing.T) {
 
 	if result.ExitCode != 1 {
 		t.Errorf("exit code = %d, want 1 for not found", result.ExitCode)
+	}
+}
+
+func TestMCPServer_VerbosityPassthrough(t *testing.T) {
+	registry := NewRegistry()
+
+	// Create embedded worker that returns predictable output
+	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+		return &buildprotocol.JobResult{
+			JobID:    job.JobID,
+			ExitCode: 0,
+			Stdout:   "stdout line 1\nstdout line 2\n",
+			Stderr:   "stderr output\n",
+		}
+	}
+
+	dispatcher := NewDispatcher(registry, embedded)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+	server := NewMCPServer(MCPServerConfig{WorktreePath: "."}, dispatcher, registry)
+	server.SetCoordinator(coord)
+
+	// Test minimal verbosity
+	result, err := server.CallTool("run_command", map[string]interface{}{
+		"command":   "echo test",
+		"verbosity": "minimal",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	if result.Stdout != "" {
+		t.Errorf("minimal: stdout should be empty, got %q", result.Stdout)
+	}
+	if result.Stderr != "stderr output\n" {
+		t.Errorf("minimal: stderr = %q, want %q", result.Stderr, "stderr output\n")
+	}
+}
+
+func TestMCPServer_VerbosityPassthrough_Normal(t *testing.T) {
+	registry := NewRegistry()
+
+	// Create embedded worker that returns predictable output
+	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+		return &buildprotocol.JobResult{
+			JobID:    job.JobID,
+			ExitCode: 0,
+			Stdout:   "stdout line 1\nstdout line 2\n",
+			Stderr:   "stderr output\n",
+		}
+	}
+
+	dispatcher := NewDispatcher(registry, embedded)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+	server := NewMCPServer(MCPServerConfig{WorktreePath: "."}, dispatcher, registry)
+	server.SetCoordinator(coord)
+
+	// Test normal verbosity
+	result, err := server.CallTool("run_command", map[string]interface{}{
+		"command":   "echo test",
+		"verbosity": "normal",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	if result.Stdout != "stdout line 1\nstdout line 2\n" {
+		t.Errorf("normal: stdout = %q, want %q", result.Stdout, "stdout line 1\nstdout line 2\n")
+	}
+	if result.Stderr != "stderr output\n" {
+		t.Errorf("normal: stderr = %q, want %q", result.Stderr, "stderr output\n")
+	}
+}
+
+func TestMCPServer_VerbosityPassthrough_Full(t *testing.T) {
+	registry := NewRegistry()
+
+	// Create embedded worker that returns predictable output
+	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+		return &buildprotocol.JobResult{
+			JobID:    job.JobID,
+			ExitCode: 0,
+			Stdout:   "stdout line 1\nstdout line 2\n",
+			Stderr:   "stderr output\n",
+		}
+	}
+
+	dispatcher := NewDispatcher(registry, embedded)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+	server := NewMCPServer(MCPServerConfig{WorktreePath: "."}, dispatcher, registry)
+	server.SetCoordinator(coord)
+
+	// Test full verbosity
+	result, err := server.CallTool("run_command", map[string]interface{}{
+		"command":   "echo test",
+		"verbosity": "full",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	if result.Stdout != "stdout line 1\nstdout line 2\n" {
+		t.Errorf("full: stdout = %q, want %q", result.Stdout, "stdout line 1\nstdout line 2\n")
+	}
+	if result.Stderr != "stderr output\n" {
+		t.Errorf("full: stderr = %q, want %q", result.Stderr, "stderr output\n")
+	}
+}
+
+func TestMCPServer_VerbosityPassthrough_Default(t *testing.T) {
+	registry := NewRegistry()
+
+	// Create embedded worker that returns predictable output
+	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+		return &buildprotocol.JobResult{
+			JobID:    job.JobID,
+			ExitCode: 0,
+			Stdout:   "stdout line 1\nstdout line 2\n",
+			Stderr:   "stderr output\n",
+		}
+	}
+
+	dispatcher := NewDispatcher(registry, embedded)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+	server := NewMCPServer(MCPServerConfig{WorktreePath: "."}, dispatcher, registry)
+	server.SetCoordinator(coord)
+
+	// Test default (no verbosity specified) - should default to minimal
+	result, err := server.CallTool("run_command", map[string]interface{}{
+		"command": "echo test",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	if result.Stdout != "" {
+		t.Errorf("default: stdout should be empty, got %q", result.Stdout)
+	}
+	if result.Stderr != "stderr output\n" {
+		t.Errorf("default: stderr = %q, want %q", result.Stderr, "stderr output\n")
+	}
+}
+
+func TestDispatcher_SubmitWithVerbosity(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+
+	job := &buildprotocol.JobMessage{
+		JobID:   "test-job-1",
+		Command: "echo test",
+	}
+
+	dispatcher.SubmitWithVerbosity(job, "full")
+
+	verbosity := dispatcher.GetVerbosity(job.JobID)
+	if verbosity != "full" {
+		t.Errorf("GetVerbosity = %q, want %q", verbosity, "full")
+	}
+}
+
+func TestDispatcher_GetVerbosity_NotFound(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+
+	verbosity := dispatcher.GetVerbosity("nonexistent")
+	if verbosity != "" {
+		t.Errorf("GetVerbosity for nonexistent job = %q, want empty", verbosity)
 	}
 }
 

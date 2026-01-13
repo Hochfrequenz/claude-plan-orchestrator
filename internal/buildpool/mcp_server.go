@@ -273,6 +273,12 @@ func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildpr
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
 
+	// Extract verbosity from args, default to minimal
+	verbosity := buildprotocol.VerbosityMinimal
+	if v, ok := args["verbosity"].(string); ok && v != "" {
+		verbosity = v
+	}
+
 	// Create job
 	jobID := fmt.Sprintf("mcp-%s", randomJobSuffix())
 	job := &buildprotocol.JobMessage{
@@ -283,12 +289,12 @@ func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildpr
 		Timeout: timeout,
 	}
 
-	// Submit to dispatcher
+	// Submit to dispatcher with verbosity
 	if s.dispatcher == nil {
 		return nil, fmt.Errorf("no dispatcher configured")
 	}
 
-	resultCh := s.dispatcher.Submit(job)
+	resultCh := s.dispatcher.SubmitWithVerbosity(job, verbosity)
 	s.dispatcher.TryDispatch()
 
 	// Wait for result

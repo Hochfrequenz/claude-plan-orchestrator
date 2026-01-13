@@ -58,19 +58,36 @@ func (d *Dispatcher) SetCancelFunc(fn CancelFunc) {
 
 // Submit adds a job to the queue and returns a channel for the result
 func (d *Dispatcher) Submit(job *buildprotocol.JobMessage) chan *buildprotocol.JobResult {
+	return d.SubmitWithVerbosity(job, "")
+}
+
+// SubmitWithVerbosity adds a job to the queue with specified verbosity level
+func (d *Dispatcher) SubmitWithVerbosity(job *buildprotocol.JobMessage, verbosity string) chan *buildprotocol.JobResult {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	resultCh := make(chan *buildprotocol.JobResult, 1)
 	pending := &PendingJob{
-		Job:      job,
-		ResultCh: resultCh,
+		Job:       job,
+		ResultCh:  resultCh,
+		Verbosity: verbosity,
 	}
 
 	d.queue = append(d.queue, pending)
 	d.pending[job.JobID] = pending
 
 	return resultCh
+}
+
+// GetVerbosity retrieves the verbosity setting for a job
+func (d *Dispatcher) GetVerbosity(jobID string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if pj, ok := d.pending[jobID]; ok {
+		return pj.Verbosity
+	}
+	return ""
 }
 
 // TryDispatch attempts to dispatch queued jobs to available workers
@@ -119,9 +136,37 @@ func (d *Dispatcher) Complete(jobID string, result *buildprotocol.JobResult) {
 	d.mu.Unlock()
 
 	if ok && pj.ResultCh != nil {
+		// Apply verbosity filtering if set
+		if pj.Verbosity != "" {
+			result = applyVerbosityFilter(result, pj.Verbosity)
+		}
 		pj.ResultCh <- result
 		close(pj.ResultCh)
 	}
+}
+
+// applyVerbosityFilter filters job result based on verbosity level
+func applyVerbosityFilter(result *buildprotocol.JobResult, verbosity string) *buildprotocol.JobResult {
+	filtered := &buildprotocol.JobResult{
+		JobID:        result.JobID,
+		ExitCode:     result.ExitCode,
+		DurationSecs: result.DurationSecs,
+		Stderr:       result.Stderr,
+	}
+
+	switch verbosity {
+	case buildprotocol.VerbosityFull:
+		filtered.Stdout = result.Stdout
+	case buildprotocol.VerbosityNormal:
+		filtered.Stdout = tailLines(result.Stdout, 50)
+	default: // minimal or empty
+		// Only stderr, no stdout
+	}
+
+	// Keep backwards-compat Output field
+	filtered.Output = filtered.Stdout + filtered.Stderr
+
+	return filtered
 }
 
 // Cancel cancels a job
