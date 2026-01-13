@@ -376,7 +376,22 @@ Build pool coordinator starting...
 
 ### Deploying Build Agents
 
-#### Option 1: Run Directly
+#### Option 1: Quick Install (Recommended)
+
+Download a pre-built binary:
+
+```bash
+# Install latest version
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install-build-agent.sh | bash
+
+# Install specific version
+curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install-build-agent.sh | bash -s -- v1.0.0
+
+# Custom install directory
+INSTALL_DIR=/opt/bin curl -fsSL https://raw.githubusercontent.com/hochfrequenz/claude-plan-orchestrator/main/scripts/install-build-agent.sh | bash
+```
+
+#### Option 2: Build from Source
 
 Build and run the agent binary:
 
@@ -406,7 +421,7 @@ git_cache_dir = "/var/cache/build-agent/repos"
 worktree_dir = "/tmp/build-agent/jobs"
 ```
 
-#### Option 2: NixOS Module
+#### Option 3: NixOS Module
 
 For NixOS systems, use the provided module:
 
@@ -433,7 +448,7 @@ The NixOS module provides:
 - Security hardening (DynamicUser, NoNewPrivileges, ProtectSystem)
 - Automatic directory creation
 
-#### Option 3: Systemd Service (Manual)
+#### Option 4: Systemd Service (Manual)
 
 Create `/etc/systemd/system/build-agent.service`:
 

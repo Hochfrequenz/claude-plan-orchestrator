@@ -29,10 +29,29 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
+  - id: build-agent
+    main: ./cmd/build-agent
+    binary: build-agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
 archives:
-  - id: default
+  - id: claude-orch
+    builds:
+      - claude-orch
     name_template: >-
-      {{ .ProjectName }}_
+      claude-orch_
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
@@ -40,6 +59,19 @@ archives:
       - README.md
       - LICENSE*
       - scripts/onboard.sh
+
+  - id: build-agent
+    builds:
+      - build-agent
+    name_template: >-
+      build-agent_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE*
+      - nix/build-agent.nix
 
 checksum:
   name_template: 'checksums.txt'
