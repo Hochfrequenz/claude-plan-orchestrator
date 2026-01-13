@@ -17,6 +17,7 @@ var (
 	serverURL  string
 	workerID   string
 	maxJobs    int
+	debug      bool
 )
 
 func main() {
@@ -30,6 +31,7 @@ func main() {
 	rootCmd.Flags().StringVar(&serverURL, "server", "", "Coordinator WebSocket URL")
 	rootCmd.Flags().StringVar(&workerID, "id", "", "Worker ID")
 	rootCmd.Flags().IntVar(&maxJobs, "jobs", 4, "Maximum concurrent jobs")
+	rootCmd.Flags().BoolVar(&debug, "debug", false, "Enable verbose logging for heartbeat diagnostics")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -118,6 +120,7 @@ func run(cmd *cobra.Command, args []string) error {
 		GitCacheDir: cfg.Storage.GitCacheDir,
 		WorktreeDir: cfg.Storage.WorktreeDir,
 		UseNixShell: true,
+		Debug:       debug,
 	})
 	if err != nil {
 		return fmt.Errorf("creating worker: %w", err)

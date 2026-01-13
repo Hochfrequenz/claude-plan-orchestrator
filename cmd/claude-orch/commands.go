@@ -359,6 +359,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			WebSocketPort:     cfg.BuildPool.WebSocketPort,
 			HeartbeatInterval: time.Duration(cfg.BuildPool.Timeouts.HeartbeatIntervalSecs) * time.Second,
 			HeartbeatTimeout:  time.Duration(cfg.BuildPool.Timeouts.HeartbeatTimeoutSecs) * time.Second,
+			Debug:             cfg.BuildPool.Debug,
 		}, registry, dispatcher)
 
 		// Start git daemon
@@ -626,6 +627,7 @@ func runBuildPoolStart(cmd *cobra.Command, args []string) error {
 		WebSocketPort:     cfg.BuildPool.WebSocketPort,
 		HeartbeatInterval: time.Duration(cfg.BuildPool.Timeouts.HeartbeatIntervalSecs) * time.Second,
 		HeartbeatTimeout:  time.Duration(cfg.BuildPool.Timeouts.HeartbeatTimeoutSecs) * time.Second,
+		Debug:             cfg.BuildPool.Debug,
 	}, registry, dispatcher)
 
 	// Start git daemon

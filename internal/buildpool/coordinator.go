@@ -21,6 +21,7 @@ type CoordinatorConfig struct {
 	GitDaemonPort     int
 	HeartbeatInterval time.Duration
 	HeartbeatTimeout  time.Duration
+	Debug             bool // Enable verbose logging for heartbeat diagnostics
 }
 
 // Coordinator manages workers and dispatches jobs
@@ -98,10 +99,14 @@ func (c *Coordinator) handleWorkerConnection(conn *websocket.Conn) {
 	}()
 
 	// Set up WebSocket-level pong handler to extend read deadline
-	log.Printf("new worker connection, setting read deadline to %v", c.config.HeartbeatTimeout)
+	if c.config.Debug {
+		log.Printf("new worker connection, setting read deadline to %v", c.config.HeartbeatTimeout)
+	}
 	conn.SetReadDeadline(time.Now().Add(c.config.HeartbeatTimeout))
 	conn.SetPongHandler(func(appData string) error {
-		log.Printf("received pong from worker %s, extending deadline to %v", workerID, c.config.HeartbeatTimeout)
+		if c.config.Debug {
+			log.Printf("received pong from worker %s, extending deadline to %v", workerID, c.config.HeartbeatTimeout)
+		}
 		conn.SetReadDeadline(time.Now().Add(c.config.HeartbeatTimeout))
 		return nil
 	})
@@ -234,8 +239,12 @@ func (c *Coordinator) Start(ctx context.Context) error {
 
 	go c.heartbeatLoop(ctx)
 
-	log.Printf("coordinator listening on %s (heartbeat_interval=%v, heartbeat_timeout=%v)",
-		addr, c.config.HeartbeatInterval, c.config.HeartbeatTimeout)
+	if c.config.Debug {
+		log.Printf("coordinator listening on %s (heartbeat_interval=%v, heartbeat_timeout=%v)",
+			addr, c.config.HeartbeatInterval, c.config.HeartbeatTimeout)
+	} else {
+		log.Printf("coordinator listening on %s", addr)
+	}
 	return c.server.ListenAndServe()
 }
 
@@ -356,7 +365,9 @@ func (c *Coordinator) heartbeatLoop(ctx context.Context) {
 
 func (c *Coordinator) sendHeartbeats() {
 	workers := c.registry.All()
-	log.Printf("sending heartbeat pings to %d workers", len(workers))
+	if c.config.Debug {
+		log.Printf("sending heartbeat pings to %d workers", len(workers))
+	}
 	for _, w := range workers {
 		// Send WebSocket protocol-level ping (not application-level)
 		// This triggers the ping handler on the worker side, keeping the connection alive
@@ -368,7 +379,7 @@ func (c *Coordinator) sendHeartbeats() {
 			log.Printf("ping to %s failed: %v", w.ID, err)
 			// Connection is broken, close it (the read loop will handle cleanup)
 			w.Conn.Close()
-		} else {
+		} else if c.config.Debug {
 			log.Printf("sent ping to worker %s", w.ID)
 		}
 	}

@@ -51,6 +51,7 @@ type BuildPoolConfig struct {
 	GitDaemonListenAddr string                 `toml:"git_daemon_listen_addr"` // e.g., "127.0.0.1" for local only
 	LocalFallback       LocalFallbackConfig    `toml:"local_fallback"`
 	Timeouts            BuildPoolTimeoutConfig `toml:"timeouts"`
+	Debug               bool                   `toml:"debug"` // Enable verbose heartbeat logging
 }
 
 // LocalFallbackConfig configures local job execution
