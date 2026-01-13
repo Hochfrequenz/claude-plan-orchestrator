@@ -249,6 +249,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	mux.HandleFunc("/ws", c.HandleWebSocket)
 	mux.HandleFunc("/status", c.HandleStatus)
 	mux.HandleFunc("/job", c.HandleJobSubmit)
+	mux.HandleFunc("/logs/", c.HandleGetLogs)
 
 	addr := fmt.Sprintf(":%d", c.config.WebSocketPort)
 	c.server = &http.Server{
@@ -359,6 +360,57 @@ func (c *Coordinator) HandleJobSubmit(w http.ResponseWriter, r *http.Request) {
 	case <-time.After(timeout):
 		http.Error(w, "job timed out", http.StatusGatewayTimeout)
 	}
+}
+
+// LogsResponse represents an HTTP log retrieval response
+type LogsResponse struct {
+	JobID  string `json:"job_id"`
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+	Error  string `json:"error,omitempty"`
+}
+
+// HandleGetLogs handles HTTP log retrieval (GET /logs/{job_id})
+func (c *Coordinator) HandleGetLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract job_id from path: /logs/{job_id}
+	jobID := strings.TrimPrefix(r.URL.Path, "/logs/")
+	if jobID == "" {
+		http.Error(w, "job_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Optional stream filter from query param
+	stream := r.URL.Query().Get("stream")
+
+	stdout, stderr, found := c.GetRetainedLogs(jobID)
+	if !found {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(LogsResponse{
+			JobID: jobID,
+			Error: "logs not found (may have been evicted from retention buffer)",
+		})
+		return
+	}
+
+	resp := LogsResponse{JobID: jobID}
+	switch stream {
+	case "stdout":
+		resp.Stdout = stdout
+	case "stderr":
+		resp.Stderr = stderr
+	default: // both
+		resp.Stdout = stdout
+		resp.Stderr = stderr
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // Stop stops the coordinator server

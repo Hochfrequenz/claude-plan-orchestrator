@@ -756,3 +756,81 @@ func TestCoordinator_VerbosityFiltering(t *testing.T) {
 		})
 	}
 }
+
+func TestCoordinator_HandleGetLogs(t *testing.T) {
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, nil)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Add some retained logs
+	coord.AccumulateOutput("test-logs-123", "stdout", "stdout content here")
+	coord.AccumulateOutput("test-logs-123", "stderr", "stderr content here")
+	coord.RetainLogs("test-logs-123")
+
+	server := httptest.NewServer(http.HandlerFunc(coord.HandleGetLogs))
+	defer server.Close()
+
+	t.Run("retrieve existing logs", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/logs/test-logs-123")
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status OK, got %d", resp.StatusCode)
+		}
+
+		var result LogsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+
+		if result.JobID != "test-logs-123" {
+			t.Errorf("job_id = %q, want %q", result.JobID, "test-logs-123")
+		}
+		if result.Stdout != "stdout content here" {
+			t.Errorf("stdout = %q, want %q", result.Stdout, "stdout content here")
+		}
+		if result.Stderr != "stderr content here" {
+			t.Errorf("stderr = %q, want %q", result.Stderr, "stderr content here")
+		}
+	})
+
+	t.Run("retrieve with stream filter", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/logs/test-logs-123?stream=stdout")
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		defer resp.Body.Close()
+
+		var result LogsResponse
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		if result.Stdout != "stdout content here" {
+			t.Errorf("stdout = %q, want %q", result.Stdout, "stdout content here")
+		}
+		if result.Stderr != "" {
+			t.Errorf("stderr should be empty with stdout filter, got %q", result.Stderr)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/logs/nonexistent-job")
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected status NotFound, got %d", resp.StatusCode)
+		}
+
+		var result LogsResponse
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		if result.Error == "" {
+			t.Error("expected error message for not found")
+		}
+	})
+}

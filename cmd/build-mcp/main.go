@@ -116,6 +116,14 @@ func handleRequest(req map[string]interface{}) map[string]interface{} {
 	}
 }
 
+// verbositySchema defines the verbosity parameter for MCP tool schemas
+var verbositySchema = map[string]interface{}{
+	"type":        "string",
+	"description": "Output verbosity level: minimal (errors only), normal (default), full (all output)",
+	"enum":        []string{"minimal", "normal", "full"},
+	"default":     "normal",
+}
+
 func listTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
@@ -124,9 +132,10 @@ func listTools() []map[string]interface{} {
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"release":  map[string]interface{}{"type": "boolean", "description": "Build in release mode"},
-					"package":  map[string]interface{}{"type": "string", "description": "Specific package to build"},
-					"features": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"release":   map[string]interface{}{"type": "boolean", "description": "Build in release mode"},
+					"package":   map[string]interface{}{"type": "string", "description": "Specific package to build"},
+					"features":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+					"verbosity": verbositySchema,
 				},
 			},
 		},
@@ -139,6 +148,7 @@ func listTools() []map[string]interface{} {
 					"filter":    map[string]interface{}{"type": "string", "description": "Test name filter"},
 					"package":   map[string]interface{}{"type": "string", "description": "Specific package to test"},
 					"nocapture": map[string]interface{}{"type": "boolean", "description": "Show stdout/stderr"},
+					"verbosity": verbositySchema,
 				},
 			},
 		},
@@ -148,7 +158,8 @@ func listTools() []map[string]interface{} {
 			"inputSchema": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"fix": map[string]interface{}{"type": "boolean", "description": "Apply suggested fixes"},
+					"fix":       map[string]interface{}{"type": "boolean", "description": "Apply suggested fixes"},
+					"verbosity": verbositySchema,
 				},
 			},
 		},
@@ -157,6 +168,26 @@ func listTools() []map[string]interface{} {
 			"description": "Get status of connected build workers",
 			"inputSchema": map[string]interface{}{
 				"type": "object",
+			},
+		},
+		{
+			"name":        "get_job_logs",
+			"description": "Retrieve complete logs for a completed job from retention buffer",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"job_id": map[string]interface{}{
+						"type":        "string",
+						"description": "The job ID to retrieve logs for",
+					},
+					"stream": map[string]interface{}{
+						"type":        "string",
+						"description": "Which stream to retrieve: stdout, stderr, or both (default: both)",
+						"enum":        []string{"stdout", "stderr", "both"},
+						"default":     "both",
+					},
+				},
+				"required": []string{"job_id"},
 			},
 		},
 	}
@@ -216,7 +247,10 @@ func callTool(name string, args map[string]interface{}) (string, error) {
 		return getWorkerStatus()
 	case "build", "test", "clippy":
 		command := buildCommand(name, args)
-		return submitJob(command)
+		verbosity, _ := args["verbosity"].(string)
+		return submitJob(command, verbosity)
+	case "get_job_logs":
+		return getJobLogs(args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -241,7 +275,7 @@ func getWorkerStatus() (string, error) {
 	return string(pretty), nil
 }
 
-func submitJob(command string) (string, error) {
+func submitJob(command, verbosity string) (string, error) {
 	// Get repo info from git
 	repo, commit := getGitInfo()
 
@@ -250,6 +284,9 @@ func submitJob(command string) (string, error) {
 		"repo":    repo,
 		"commit":  commit,
 		"timeout": 300, // 5 minute default
+	}
+	if verbosity != "" {
+		reqBody["verbosity"] = verbosity
 	}
 
 	jsonBody, _ := json.Marshal(reqBody)
@@ -283,6 +320,48 @@ func submitJob(command string) (string, error) {
 	}
 
 	return result.Output, nil
+}
+
+func getJobLogs(args map[string]interface{}) (string, error) {
+	jobID, _ := args["job_id"].(string)
+	if jobID == "" {
+		return "", fmt.Errorf("job_id is required")
+	}
+
+	// Build URL with optional stream query param
+	url := coordinatorURL + "/logs/" + jobID
+	if stream, ok := args["stream"].(string); ok && stream != "" && stream != "both" {
+		url += "?stream=" + stream
+	}
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to build pool: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		var result struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(body, &result)
+		return fmt.Sprintf("Logs not found for job %s: %s", jobID, result.Error), nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("build pool error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	// Pretty-print the JSON response
+	var data interface{}
+	json.Unmarshal(body, &data)
+	pretty, _ := json.MarshalIndent(data, "", "  ")
+	return string(pretty), nil
 }
 
 func getGitInfo() (string, string) {
