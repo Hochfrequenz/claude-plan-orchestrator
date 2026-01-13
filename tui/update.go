@@ -933,7 +933,7 @@ func fetchWorkersCmd(buildPoolURL string) tea.Cmd {
 // testWorkerCmd sends a test job to verify worker connectivity
 func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 	return func() tea.Msg {
-		client := &http.Client{Timeout: 30 * time.Second}
+		client := &http.Client{Timeout: 150 * time.Second} // Must exceed job timeout (120s)
 
 		// Extract hostname from buildPoolURL (e.g., "http://host:8081" -> "host")
 		// and construct git daemon URL (default port 9418)
