@@ -92,8 +92,11 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 	}, nil
 }
 
-// pongWait is how long we wait for a pong response before timing out
-const pongWait = 90 * time.Second
+// pingWait is how long we wait for a ping from the coordinator before timing out
+const pingWait = 90 * time.Second
+
+// writeWait is time allowed to write a control message
+const writeWait = 10 * time.Second
 
 // Connect establishes connection to the coordinator
 func (w *Worker) Connect() error {
@@ -102,11 +105,18 @@ func (w *Worker) Connect() error {
 		return fmt.Errorf("dial failed: %w", err)
 	}
 
-	// Set up WebSocket-level pong handler to extend read deadline
-	conn.SetReadDeadline(time.Now().Add(pongWait))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
+	// Set up WebSocket-level ping handler to extend read deadline when coordinator pings us
+	conn.SetReadDeadline(time.Now().Add(pingWait))
+	conn.SetPingHandler(func(appData string) error {
+		log.Printf("received ping from coordinator, extending deadline")
+		conn.SetReadDeadline(time.Now().Add(pingWait))
+		// Send pong response (must do this since we override the default handler)
+		deadline := time.Now().Add(writeWait)
+		err := conn.WriteControl(websocket.PongMessage, []byte(appData), deadline)
+		if err != nil {
+			log.Printf("failed to send pong: %v", err)
+		}
+		return err
 	})
 
 	w.mu.Lock()
@@ -140,7 +150,7 @@ func (w *Worker) Run() error {
 		}
 
 		// Extend read deadline on any message received
-		w.conn.SetReadDeadline(time.Now().Add(pongWait))
+		w.conn.SetReadDeadline(time.Now().Add(pingWait))
 
 		var env buildprotocol.EnvelopeRaw
 		if err := json.Unmarshal(message, &env); err != nil {

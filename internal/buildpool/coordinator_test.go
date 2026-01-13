@@ -379,7 +379,7 @@ func TestCoordinatorHeartbeat(t *testing.T) {
 	config := CoordinatorConfig{
 		WebSocketPort:     0,
 		HeartbeatInterval: 50 * time.Millisecond,
-		HeartbeatTimeout:  100 * time.Millisecond,
+		HeartbeatTimeout:  100 * time.Millisecond, // Read deadline - worker evicted if no pong received
 	}
 
 	coord := NewCoordinator(config, registry, dispatcher)
@@ -406,14 +406,13 @@ func TestCoordinatorHeartbeat(t *testing.T) {
 		t.Fatal("worker not registered")
 	}
 
-	// Set a past heartbeat time to simulate timeout
-	worker.LastHeartbeat = time.Now().Add(-200 * time.Millisecond)
-
-	// Manually trigger heartbeat check (normally done by heartbeatLoop)
+	// Send a ping - the test client doesn't respond with pong, so the coordinator's
+	// read deadline will expire and the worker will be disconnected
 	coord.sendHeartbeats()
 
-	// Worker should be evicted due to timeout
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the read deadline to expire (HeartbeatTimeout = 100ms)
+	// The worker should be evicted after the deadline passes
+	time.Sleep(150 * time.Millisecond)
 
 	if registry.Get("heartbeat-test") != nil {
 		t.Error("worker should have been evicted due to heartbeat timeout")
