@@ -2,10 +2,12 @@
 package buildpool
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestGitDaemon_Config(t *testing.T) {
@@ -100,5 +102,43 @@ func TestGitDaemon_Args(t *testing.T) {
 		if args[i] != exp {
 			t.Errorf("arg[%d]: expected %q, got %q", i, exp, args[i])
 		}
+	}
+}
+
+func TestGitDaemon_StartStop(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoDir := t.TempDir()
+
+	// Initialize git repo
+	cmd := exec.Command("git", "init")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+
+	// Use a high port to avoid conflicts
+	daemon := NewGitDaemon(GitDaemonConfig{
+		Port:    19418, // High port to avoid conflicts
+		BaseDir: repoDir,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start daemon
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Give it a moment to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop daemon
+	if err := daemon.Stop(); err != nil {
+		t.Errorf("Stop failed: %v", err)
 	}
 }

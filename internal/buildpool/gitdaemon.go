@@ -8,6 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"syscall"
+	"time"
 )
 
 // GitDaemonConfig configures the git daemon
@@ -20,6 +23,7 @@ type GitDaemonConfig struct {
 type GitDaemon struct {
 	config GitDaemonConfig
 	cmd    *exec.Cmd
+	mu     sync.Mutex
 }
 
 // NewGitDaemon creates a new git daemon manager
@@ -56,6 +60,9 @@ func (d *GitDaemon) Start(ctx context.Context) error {
 		}
 	}
 
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	d.cmd = exec.CommandContext(ctx, "git", d.Args()...)
 	d.cmd.Stdout = os.Stdout
 	d.cmd.Stderr = os.Stderr
@@ -68,18 +75,41 @@ func (d *GitDaemon) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the git daemon
+// Stop stops the git daemon gracefully
 func (d *GitDaemon) Stop() error {
-	if d.cmd != nil && d.cmd.Process != nil {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.cmd == nil || d.cmd.Process == nil {
+		return nil
+	}
+
+	// Try graceful shutdown first
+	d.cmd.Process.Signal(syscall.SIGTERM)
+
+	// Wait briefly for graceful exit
+	done := make(chan error, 1)
+	go func() {
+		done <- d.cmd.Wait()
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(5 * time.Second):
+		// Force kill if not responding
 		return d.cmd.Process.Kill()
 	}
-	return nil
 }
 
 // Wait waits for the daemon to exit
 func (d *GitDaemon) Wait() error {
-	if d.cmd != nil {
-		return d.cmd.Wait()
+	d.mu.Lock()
+	cmd := d.cmd
+	d.mu.Unlock()
+
+	if cmd != nil {
+		return cmd.Wait()
 	}
 	return nil
 }
