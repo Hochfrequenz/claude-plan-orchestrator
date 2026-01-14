@@ -1224,10 +1224,21 @@ func (m Model) renderSyncModal() string {
 	b.WriteString(modalTitleStyle.Render("SYNC CONFLICTS"))
 	b.WriteString("\n\n")
 
-	// Instructions
-	b.WriteString(queuedStyle.Render("Resolve conflicts: [d]database [m]markdown [a]all-db"))
+	// Description
+	b.WriteString(queuedStyle.Render("Database and markdown files have different status values."))
 	b.WriteString("\n")
-	b.WriteString(queuedStyle.Render("[j/k]navigate [enter]apply [esc]cancel"))
+	b.WriteString(queuedStyle.Render("Choose which source should be authoritative:"))
+	b.WriteString("\n\n")
+
+	// Instructions
+	b.WriteString(runningStyle.Render("[d]"))
+	b.WriteString(queuedStyle.Render(" use DB status  "))
+	b.WriteString(warningStyle.Render("[m]"))
+	b.WriteString(queuedStyle.Render(" use Markdown status  "))
+	b.WriteString(runningStyle.Render("[a]"))
+	b.WriteString(queuedStyle.Render(" all use DB"))
+	b.WriteString("\n")
+	b.WriteString(queuedStyle.Render("[j/k] navigate  [enter] apply  [esc] cancel"))
 	b.WriteString("\n\n")
 
 	// Count resolved
@@ -1237,28 +1248,43 @@ func (m Model) renderSyncModal() string {
 			resolvedCount++
 		}
 	}
-	b.WriteString(queuedStyle.Render(fmt.Sprintf("Resolved: %d/%d", resolvedCount, len(m.syncModal.Conflicts))))
+	b.WriteString(queuedStyle.Render(fmt.Sprintf("Progress: %d/%d resolved", resolvedCount, len(m.syncModal.Conflicts))))
 	b.WriteString("\n\n")
+
+	// Header
+	b.WriteString(headerStyle.Render(fmt.Sprintf("%-14s  %-20s  %-20s  %s", "Task", "Database", "Markdown", "Action")))
+	b.WriteString("\n")
 
 	// Conflicts list
 	for i, conflict := range m.syncModal.Conflicts {
 		selected := i == m.syncModal.Selected
 		resolution := m.syncModal.Resolutions[conflict.TaskID]
 
-		// Format the conflict line
+		// Format the conflict line with details
 		line := renderConflictLine(conflict, resolution, selected)
 		b.WriteString(line)
 		b.WriteString("\n")
+
+		// Show file path for selected item
+		if selected && conflict.EpicFilePath != "" {
+			filePath := conflict.EpicFilePath
+			// Truncate path if too long, showing end
+			if len(filePath) > 50 {
+				filePath = "..." + filePath[len(filePath)-47:]
+			}
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  └─ %s", filePath)))
+			b.WriteString("\n")
+		}
 	}
 
 	// Wrap in modal style
 	modalContent := b.String()
 
-	// Calculate modal dimensions
-	modalWidth := 60
-	if m.width > 70 {
-		modalWidth = 60
-	} else if m.width > 50 {
+	// Calculate modal dimensions - wider to accommodate detail
+	modalWidth := 75
+	if m.width > 85 {
+		modalWidth = 75
+	} else if m.width > 60 {
 		modalWidth = m.width - 10
 	} else {
 		modalWidth = m.width - 4
@@ -1269,25 +1295,34 @@ func (m Model) renderSyncModal() string {
 
 // renderConflictLine renders a single conflict with its resolution status
 func renderConflictLine(conflict isync.SyncConflict, resolution string, selected bool) string {
-	// Format: TaskID: DBStatus -> MarkdownStatus [RESOLVED: db/md]
-	line := fmt.Sprintf("%-15s │ DB: %-12s │ MD: %-12s",
-		conflict.TaskID,
-		truncate(string(conflict.DBStatus), 12),
-		truncate(string(conflict.MarkdownStatus), 12))
+	// Get emoji representations for statuses
+	dbEmoji := isync.StatusEmoji(domain.TaskStatus(conflict.DBStatus))
+	mdEmoji := isync.StatusEmoji(domain.TaskStatus(conflict.MarkdownStatus))
 
-	// Add resolution indicator
+	// Format status with emoji: "🔴 not_started"
+	dbDisplay := fmt.Sprintf("%s %-11s", dbEmoji, truncate(conflict.DBStatus, 11))
+	mdDisplay := fmt.Sprintf("%s %-11s", mdEmoji, truncate(conflict.MarkdownStatus, 11))
+
+	// Build the main line
+	var line string
+	line = fmt.Sprintf("%-14s  %-20s  %-20s",
+		conflict.TaskID,
+		dbDisplay,
+		mdDisplay)
+
+	// Add resolution indicator with visual distinction
 	switch resolution {
 	case "db":
-		line += " " + resolvedDBStyle.Render("[✓ DB]")
+		line += "  " + resolvedDBStyle.Render("→ use DB ✓")
 	case "markdown":
-		line += " " + resolvedMarkdownStyle.Render("[✓ MD]")
+		line += "  " + resolvedMarkdownStyle.Render("→ use MD ✓")
 	default:
-		line += " " + queuedStyle.Render("[?]")
+		line += "  " + warningStyle.Render("← choose")
 	}
 
 	// Highlight if selected
 	if selected {
-		return modalSelectedStyle.Render(line)
+		return modalSelectedStyle.Render("▸ " + line)
 	}
-	return queuedStyle.Render(line)
+	return queuedStyle.Render("  " + line)
 }

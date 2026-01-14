@@ -73,6 +73,7 @@ type AgentStore interface {
 	UpdateAgentRunUsage(id string, tokensInput, tokensOutput int, costUSD float64) error
 	ListActiveAgentRuns() ([]*AgentRunRecord, error)
 	DeleteAgentRun(id string) error
+	UpdateTaskStatus(id string, status domain.TaskStatus) error
 }
 
 // AgentRunRecord represents a persisted agent run (matches taskstore.AgentRun)
@@ -1004,7 +1005,7 @@ func (m *AgentManager) RecoverAgents(ctx context.Context) ([]*Agent, error) {
 // CreateStatusCallback returns a callback that updates the manager's store and syncs status
 func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 	return func(agent *Agent, newStatus AgentStatus, errMsg string) {
-		// Update database
+		// Update agent_runs table in database
 		if m.store != nil && agent.ID != "" {
 			m.store.UpdateAgentRunStatus(agent.ID, string(newStatus), errMsg)
 			// Save token usage when agent completes
@@ -1016,19 +1017,27 @@ func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 			}
 		}
 
+		// Determine task status for sync
+		var taskStatus domain.TaskStatus
+		switch newStatus {
+		case AgentCompleted:
+			taskStatus = domain.StatusComplete
+		case AgentRunning:
+			taskStatus = domain.StatusInProgress
+		default:
+			// Don't sync for other statuses (failed, stuck, queued)
+			return
+		}
+
+		// Update tasks table in database (this was missing - caused sync issues)
+		if m.store != nil {
+			if err := m.store.UpdateTaskStatus(agent.TaskID.String(), taskStatus); err != nil {
+				fmt.Printf("Warning: failed to update task status in DB for %s: %v\n", agent.TaskID.String(), err)
+			}
+		}
+
 		// Sync epic and README status (atomic operation)
 		if m.syncer != nil && agent.EpicFilePath != "" {
-			var taskStatus domain.TaskStatus
-			switch newStatus {
-			case AgentCompleted:
-				taskStatus = domain.StatusComplete
-			case AgentRunning:
-				taskStatus = domain.StatusInProgress
-			default:
-				// Don't sync for other statuses (failed, stuck, queued)
-				return
-			}
-
 			// Atomically: pull, update files, commit, push
 			if err := m.syncer.SyncTaskStatus(agent.TaskID, taskStatus, agent.EpicFilePath); err != nil {
 				fmt.Printf("Warning: sync failed for %s: %v\n", agent.TaskID.String(), err)

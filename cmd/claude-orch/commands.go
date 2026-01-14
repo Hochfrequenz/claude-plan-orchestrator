@@ -579,6 +579,10 @@ func (a *agentStoreAdapter) UpdateAgentRunUsage(id string, tokensInput, tokensOu
 	return a.store.UpdateAgentRunUsage(id, tokensInput, tokensOutput, costUSD)
 }
 
+func (a *agentStoreAdapter) UpdateTaskStatus(id string, status domain.TaskStatus) error {
+	return a.store.UpdateTaskStatus(id, status)
+}
+
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg, err := loadConfig()
 	if err != nil {
