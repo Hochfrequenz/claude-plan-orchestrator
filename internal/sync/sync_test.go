@@ -10,28 +10,34 @@ import (
 )
 
 func TestUpdateREADMEStatus(t *testing.T) {
-	dir := t.TempDir()
-	readmePath := filepath.Join(dir, "README.md")
+	// Create directory structure: {root}/docs/plans/
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	os.MkdirAll(plansDir, 0755)
 
+	// README.md is at project root
+	readmePath := filepath.Join(root, "README.md")
+
+	// Use the actual format from energyerp README with links
 	content := `# Project
 
-## Technical Module
+### Technical Module
 
-| Epic | Status | Description |
-|------|--------|-------------|
-| E00 | 🔴 | Scaffolding |
-| E01 | 🔴 | Entities |
-| E02 | 🔴 | Validators |
+| Epic | Description | Status |
+|------|-------------|:------:|
+| [E00](docs/plans/technical-module/epic-00.md) | Scaffolding | 🔴 |
+| [E01](docs/plans/technical-module/epic-01.md) | Entities | 🔴 |
+| [E02](docs/plans/technical-module/epic-02.md) | Validators | 🔴 |
 
-## Billing Module
+### Billing Module
 
-| Epic | Status | Description |
-|------|--------|-------------|
-| E00 | 🔴 | Setup |
+| Epic | Description | Status |
+|------|-------------|:------:|
+| [E00](docs/plans/billing-module/epic-00.md) | Setup | 🔴 |
 `
 	os.WriteFile(readmePath, []byte(content), 0644)
 
-	syncer := New(dir)
+	syncer := New(plansDir)
 
 	// Update E00 to in_progress
 	err := syncer.UpdateTaskStatus(domain.TaskID{Module: "technical", EpicNum: 0}, domain.StatusInProgress)
@@ -41,8 +47,8 @@ func TestUpdateREADMEStatus(t *testing.T) {
 
 	// Read back
 	updated, _ := os.ReadFile(readmePath)
-	if !containsString(string(updated), "| E00 | 🟡 |") {
-		t.Error("E00 should be updated to 🟡")
+	if !containsString(string(updated), "| 🟡 |") {
+		t.Errorf("E00 should be updated to 🟡, got:\n%s", string(updated))
 	}
 
 	// Update E00 to complete
@@ -52,14 +58,31 @@ func TestUpdateREADMEStatus(t *testing.T) {
 	}
 
 	updated, _ = os.ReadFile(readmePath)
-	if !containsString(string(updated), "| E00 | 🟢 |") {
-		t.Error("E00 should be updated to 🟢")
+	if !containsString(string(updated), "| 🟢 |") {
+		t.Errorf("E00 should be updated to 🟢, got:\n%s", string(updated))
+	}
+
+	// Verify billing module E00 is still 🔴
+	lines := strings.Split(string(updated), "\n")
+	inBilling := false
+	for _, line := range lines {
+		if strings.Contains(strings.ToLower(line), "billing") {
+			inBilling = true
+		}
+		if inBilling && strings.Contains(line, "[E00]") {
+			if !strings.Contains(line, "🔴") {
+				t.Error("Billing E00 should still be 🔴")
+			}
+			break
+		}
 	}
 }
 
 func TestUpdateEpicFile(t *testing.T) {
-	dir := t.TempDir()
-	moduleDir := filepath.Join(dir, "technical-module")
+	// Create directory structure: {root}/docs/plans/technical-module/
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical-module")
 	os.MkdirAll(moduleDir, 0755)
 
 	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
@@ -69,7 +92,7 @@ Implement input validation.
 `
 	os.WriteFile(epicPath, []byte(content), 0644)
 
-	syncer := New(dir)
+	syncer := New(plansDir)
 	err := syncer.UpdateEpicStatus(epicPath, domain.StatusComplete, 142, "2026-01-12")
 	if err != nil {
 		t.Fatal(err)
@@ -103,11 +126,14 @@ func TestParseStatusEmoji(t *testing.T) {
 }
 
 func TestUpdateEpicFrontmatter(t *testing.T) {
-	dir := t.TempDir()
-	syncer := New(dir)
+	// Create directory structure: {root}/docs/plans/
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	os.MkdirAll(plansDir, 0755)
+	syncer := New(plansDir)
 
 	t.Run("updates existing status", func(t *testing.T) {
-		epicPath := filepath.Join(dir, "epic-01.md")
+		epicPath := filepath.Join(plansDir, "epic-01.md")
 		content := `---
 status: todo
 priority: high
@@ -132,7 +158,7 @@ priority: high
 	})
 
 	t.Run("adds status if missing", func(t *testing.T) {
-		epicPath := filepath.Join(dir, "epic-02.md")
+		epicPath := filepath.Join(plansDir, "epic-02.md")
 		content := `---
 priority: low
 ---
@@ -153,7 +179,7 @@ priority: low
 	})
 
 	t.Run("adds frontmatter when missing", func(t *testing.T) {
-		epicPath := filepath.Join(dir, "epic-03.md")
+		epicPath := filepath.Join(plansDir, "epic-03.md")
 		content := `# Epic 03: No Frontmatter
 `
 		os.WriteFile(epicPath, []byte(content), 0644)

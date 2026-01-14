@@ -7,18 +7,26 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	gosync "sync"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 )
 
 // Syncer handles status synchronization back to markdown files
 type Syncer struct {
-	plansDir string
+	plansDir    string
+	projectRoot string
+	gitMu       gosync.Mutex // Mutex for git operations to prevent concurrent access
 }
 
 // New creates a new Syncer
 func New(plansDir string) *Syncer {
-	return &Syncer{plansDir: plansDir}
+	// Project root is parent of docs/plans
+	projectRoot := filepath.Dir(filepath.Dir(plansDir))
+	return &Syncer{
+		plansDir:    plansDir,
+		projectRoot: projectRoot,
+	}
 }
 
 // StatusEmoji returns the emoji for a task status
@@ -35,38 +43,59 @@ func StatusEmoji(status domain.TaskStatus) string {
 	}
 }
 
-// UpdateTaskStatus updates the task status in README.md
+// UpdateTaskStatus updates the task status in README.md at the project root
 func (s *Syncer) UpdateTaskStatus(taskID domain.TaskID, status domain.TaskStatus) error {
-	readmePath := filepath.Join(s.plansDir, "README.md")
+	// README.md is at project root, not in docs/plans
+	readmePath := filepath.Join(s.projectRoot, "README.md")
 	content, err := os.ReadFile(readmePath)
 	if err != nil {
 		return err
 	}
 
-	// Pattern to match epic row: | E{num} | {emoji} |
-	pattern := fmt.Sprintf(`(\| E%02d \| )[🔴🟡🟢]( \|)`, taskID.EpicNum)
-	re := regexp.MustCompile(pattern)
+	// Pattern to match epic row in format: | [E00](link) | Description | 🔴 |
+	// The epic number can be E00, E01, E1, E2, etc.
+	// We match: | [E{num}](...) | ... | {emoji} |
+	epicNum := taskID.EpicNum
+	// Try both formats: E00 (zero-padded) and E0 (not padded)
+	patterns := []string{
+		fmt.Sprintf(`(\| \[E%02d\]\([^)]+\) \|[^|]+\| )[🔴🟡🟢]( \|)`, epicNum),
+		fmt.Sprintf(`(\| \[E%d\]\([^)]+\) \|[^|]+\| )[🔴🟡🟢]( \|)`, epicNum),
+	}
 
 	newEmoji := StatusEmoji(status)
-	replacement := fmt.Sprintf("${1}%s${2}", newEmoji)
+	contentStr := string(content)
 
 	// Find the module section and update within it
-	updated := updateInModuleSection(string(content), taskID.Module, re, replacement)
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		replacement := fmt.Sprintf("${1}%s${2}", newEmoji)
+		updated := updateInModuleSection(contentStr, taskID.Module, re, replacement)
+		if updated != contentStr {
+			contentStr = updated
+			break
+		}
+	}
 
-	return os.WriteFile(readmePath, []byte(updated), 0644)
+	return os.WriteFile(readmePath, []byte(contentStr), 0644)
 }
 
 func updateInModuleSection(content, module string, re *regexp.Regexp, replacement string) string {
-	// Find module header (## Module Name or ## module-name Module)
-	modulePattern := regexp.MustCompile(fmt.Sprintf(`(?i)##\s+%s[- ]?module`, module))
+	// Normalize module name for matching (e.g., "technical" matches "Technical Module")
+	// Handle both "### Technical Module" and "## technical-module" style headers
+	moduleLower := strings.ToLower(module)
+	moduleLower = strings.TrimSuffix(moduleLower, "-module")
+
 	lines := strings.Split(content, "\n")
 
 	inModule := false
 	var result []string
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "## ") {
-			inModule = modulePattern.MatchString(line)
+		// Check for section headers (## or ###)
+		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
+			lineLower := strings.ToLower(line)
+			// Check if this header contains the module name
+			inModule = strings.Contains(lineLower, moduleLower)
 		}
 
 		if inModule && re.MatchString(line) {
@@ -163,15 +192,14 @@ func (s *Syncer) UpdateEpicFrontmatter(epicPath string, status domain.TaskStatus
 	return os.WriteFile(epicPath, []byte(frontmatter+rest), 0644)
 }
 
-// projectRoot returns the project root directory (parent of docs/plans)
-func (s *Syncer) projectRoot() string {
-	return filepath.Dir(filepath.Dir(s.plansDir))
-}
-
 // GitPull pulls the latest changes from the remote
+// Uses mutex to prevent concurrent git operations
 func (s *Syncer) GitPull() error {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+
 	cmd := exec.Command("git", "pull", "--rebase")
-	cmd.Dir = s.projectRoot()
+	cmd.Dir = s.projectRoot
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git pull failed: %w\n%s", err, output)
@@ -180,14 +208,31 @@ func (s *Syncer) GitPull() error {
 }
 
 // GitCommitAndPush commits and pushes the README and epic status changes
-func (s *Syncer) GitCommitAndPush(taskID domain.TaskID, status domain.TaskStatus) error {
-	root := s.projectRoot()
+// Uses mutex to prevent concurrent git operations
+func (s *Syncer) GitCommitAndPush(taskID domain.TaskID, status domain.TaskStatus, epicFilePath string) error {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
 
-	// Stage only the README.md in docs/plans
-	readmePath := filepath.Join(s.plansDir, "README.md")
+	root := s.projectRoot
+
+	// Stage README.md at project root
+	readmePath := filepath.Join(root, "README.md")
 	relReadme, _ := filepath.Rel(root, readmePath)
 
-	cmd := exec.Command("git", "add", relReadme)
+	// Build list of files to stage
+	filesToStage := []string{relReadme}
+
+	// Also stage the epic file if provided
+	if epicFilePath != "" {
+		relEpic, err := filepath.Rel(root, epicFilePath)
+		if err == nil {
+			filesToStage = append(filesToStage, relEpic)
+		}
+	}
+
+	// Stage all files
+	args := append([]string{"add"}, filesToStage...)
+	cmd := exec.Command("git", args...)
 	cmd.Dir = root
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git add failed: %w\n%s", err, output)

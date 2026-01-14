@@ -1045,8 +1045,8 @@ func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 				fmt.Printf("Warning: failed to update README status for %s: %v\n", agent.TaskID.String(), err)
 			}
 
-			// Commit and push the changes
-			if err := m.syncer.GitCommitAndPush(agent.TaskID, taskStatus); err != nil {
+			// Commit and push the changes (including epic file)
+			if err := m.syncer.GitCommitAndPush(agent.TaskID, taskStatus, agent.EpicFilePath); err != nil {
 				fmt.Printf("Warning: git commit/push failed for %s: %v\n", agent.TaskID.String(), err)
 			}
 		}
