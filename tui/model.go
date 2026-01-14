@@ -76,6 +76,8 @@ type Model struct {
 	selectedAgent      int
 	showAgentDetail    bool
 	agentOutputScroll  int // Scroll position for agent output
+	showAgentHistory   bool // Toggle to show completed/failed agent history
+	agentHistory       []*AgentView // Historical agent runs from database
 	testRunning        bool
 	testOutput         string
 

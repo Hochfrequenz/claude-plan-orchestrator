@@ -79,6 +79,12 @@ type AgentResumeMsg struct {
 	Error   string
 }
 
+// AgentHistoryMsg contains loaded historical agent runs
+type AgentHistoryMsg struct {
+	History []*AgentView
+	Error   error
+}
+
 // WorkersUpdateMsg updates the workers list from build pool
 type WorkersUpdateMsg struct {
 	Workers []*WorkerView
@@ -289,6 +295,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Overview: refresh agent list
 					m.updateAgentsFromManager()
 					m.statusMsg = "Agents refreshed"
+				}
+			}
+		case "h":
+			// Toggle agent history on Agents tab
+			if m.activeTab == 2 && !m.showAgentDetail {
+				m.showAgentHistory = !m.showAgentHistory
+				if m.showAgentHistory {
+					m.statusMsg = "Loading history..."
+					return m, loadAgentHistoryCmd(m.store)
+				} else {
+					m.agentHistory = nil
+					m.statusMsg = "History hidden"
 				}
 			}
 		case "tab":
@@ -818,6 +836,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = ""
 			// Recompute module summaries
 			m.modules = computeModuleSummaries(m.allTasks)
+		}
+		return m, nil
+
+	case AgentHistoryMsg:
+		if msg.Error != nil {
+			m.statusMsg = fmt.Sprintf("Failed to load history: %v", msg.Error)
+			m.showAgentHistory = false
+		} else {
+			m.agentHistory = msg.History
+			m.statusMsg = fmt.Sprintf("Showing %d historical runs (h to hide)", len(msg.History))
 		}
 		return m, nil
 	}
@@ -1591,4 +1619,44 @@ func (m *Model) tryStartAutoTasks() tea.Cmd {
 		m.agentManager,
 		m.planWatcher,
 	)
+}
+
+// loadAgentHistoryCmd loads completed/failed agent runs from the database
+func loadAgentHistoryCmd(store *taskstore.Store) tea.Cmd {
+	return func() tea.Msg {
+		if store == nil {
+			return AgentHistoryMsg{Error: fmt.Errorf("no database configured")}
+		}
+
+		runs, err := store.ListRecentAgentRuns(50) // Load last 50 runs
+		if err != nil {
+			return AgentHistoryMsg{Error: err}
+		}
+
+		// Convert to AgentViews
+		var history []*AgentView
+		for _, run := range runs {
+			var duration time.Duration
+			if run.FinishedAt != nil {
+				duration = run.FinishedAt.Sub(run.StartedAt)
+			}
+			status := executor.AgentCompleted
+			if run.Status == "failed" {
+				status = executor.AgentFailed
+			}
+			history = append(history, &AgentView{
+				TaskID:       run.TaskID,
+				Title:        run.TaskID, // Use task ID as title since we don't have the task title stored
+				Duration:     duration,
+				Status:       status,
+				WorktreePath: run.WorktreePath,
+				Error:        run.ErrorMessage,
+				TokensInput:  run.TokensInput,
+				TokensOutput: run.TokensOutput,
+				CostUSD:      run.CostUSD,
+			})
+		}
+
+		return AgentHistoryMsg{History: history}
+	}
 }

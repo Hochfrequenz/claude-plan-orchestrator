@@ -345,3 +345,44 @@ func (s *Store) UpdateAgentRunUsage(id string, tokensInput, tokensOutput int, co
 	`, tokensInput, tokensOutput, costUSD, id)
 	return err
 }
+
+// ListRecentAgentRuns returns completed/failed agent runs, most recent first
+func (s *Store) ListRecentAgentRuns(limit int) ([]*AgentRun, error) {
+	rows, err := s.db.Query(`
+		SELECT id, task_id, worktree_path, log_path, pid, status, started_at, finished_at,
+		       error_message, COALESCE(session_id, ''), tokens_input, tokens_output, cost_usd
+		FROM agent_runs
+		WHERE status IN ('completed', 'failed')
+		ORDER BY COALESCE(finished_at, started_at) DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []*AgentRun
+	for rows.Next() {
+		var run AgentRun
+		var finishedAt sql.NullTime
+		var errorMsg sql.NullString
+
+		err := rows.Scan(&run.ID, &run.TaskID, &run.WorktreePath, &run.LogPath, &run.PID,
+			&run.Status, &run.StartedAt, &finishedAt, &errorMsg, &run.SessionID,
+			&run.TokensInput, &run.TokensOutput, &run.CostUSD)
+		if err != nil {
+			return nil, err
+		}
+
+		if finishedAt.Valid {
+			run.FinishedAt = &finishedAt.Time
+		}
+		if errorMsg.Valid {
+			run.ErrorMessage = errorMsg.String
+		}
+
+		runs = append(runs, &run)
+	}
+
+	return runs, rows.Err()
+}

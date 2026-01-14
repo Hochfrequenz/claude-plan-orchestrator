@@ -584,6 +584,32 @@ func (a *agentStoreAdapter) ListActiveAgentRuns() ([]*executor.AgentRunRecord, e
 	return result, nil
 }
 
+func (a *agentStoreAdapter) ListRecentAgentRuns(limit int) ([]*executor.AgentRunRecord, error) {
+	runs, err := a.store.ListRecentAgentRuns(limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*executor.AgentRunRecord, len(runs))
+	for i, run := range runs {
+		result[i] = &executor.AgentRunRecord{
+			ID:           run.ID,
+			TaskID:       run.TaskID,
+			WorktreePath: run.WorktreePath,
+			LogPath:      run.LogPath,
+			PID:          run.PID,
+			Status:       run.Status,
+			StartedAt:    run.StartedAt,
+			FinishedAt:   run.FinishedAt,
+			ErrorMessage: run.ErrorMessage,
+			SessionID:    run.SessionID,
+			TokensInput:  run.TokensInput,
+			TokensOutput: run.TokensOutput,
+			CostUSD:      run.CostUSD,
+		}
+	}
+	return result, nil
+}
+
 func (a *agentStoreAdapter) DeleteAgentRun(id string) error {
 	return a.store.DeleteAgentRun(id)
 }

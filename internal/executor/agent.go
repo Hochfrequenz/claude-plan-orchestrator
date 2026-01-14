@@ -73,6 +73,7 @@ type AgentStore interface {
 	UpdateAgentRunStatus(id string, status string, errorMessage string) error
 	UpdateAgentRunUsage(id string, tokensInput, tokensOutput int, costUSD float64) error
 	ListActiveAgentRuns() ([]*AgentRunRecord, error)
+	ListRecentAgentRuns(limit int) ([]*AgentRunRecord, error)
 	DeleteAgentRun(id string) error
 	UpdateTaskStatus(id string, status domain.TaskStatus) error
 }

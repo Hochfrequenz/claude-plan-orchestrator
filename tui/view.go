@@ -69,6 +69,12 @@ var (
 
 	inProgressStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("214"))
+
+	dimmedStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	dimmedWarningStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("172"))
 )
 
 // View renders the TUI
@@ -706,6 +712,54 @@ func (m Model) renderAgentsDetail() string {
 	if len(m.agents) > 0 {
 		b.WriteString("\n")
 		b.WriteString(queuedStyle.Render("  Press [enter] to view agent details, [j/k] to navigate"))
+	}
+
+	// History section (toggle with 'h')
+	b.WriteString("\n\n")
+	if m.showAgentHistory {
+		b.WriteString(titleStyle.Render(fmt.Sprintf("HISTORY (%d recent runs)", len(m.agentHistory))))
+		b.WriteString("\n")
+		if len(m.agentHistory) == 0 {
+			b.WriteString(queuedStyle.Render("  No completed runs found."))
+			b.WriteString("\n")
+		} else {
+			for _, agent := range m.agentHistory {
+				var statusIcon string
+				var style lipgloss.Style
+				switch agent.Status {
+				case executor.AgentCompleted:
+					statusIcon = "✓"
+					style = dimmedStyle
+				case executor.AgentFailed:
+					statusIcon = "✗"
+					style = dimmedWarningStyle
+				default:
+					statusIcon = "○"
+					style = dimmedStyle
+				}
+
+				// Show error preview for failed agents or duration
+				extra := formatDuration(agent.Duration)
+				if agent.Status == executor.AgentFailed && agent.Error != "" {
+					extra = truncate(agent.Error, 25)
+				}
+
+				// Show cost if available
+				costStr := ""
+				if agent.CostUSD > 0 {
+					costStr = fmt.Sprintf(" $%.2f", agent.CostUSD)
+				}
+
+				line := fmt.Sprintf("  %s %-15s %8s%s  %s",
+					statusIcon, agent.TaskID,
+					formatDuration(agent.Duration), costStr, extra)
+				b.WriteString(style.Render(line))
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString(queuedStyle.Render("  Press [h] to hide history"))
+	} else {
+		b.WriteString(queuedStyle.Render("  Press [h] to show completed/failed run history"))
 	}
 
 	return strings.TrimSuffix(b.String(), "\n")
