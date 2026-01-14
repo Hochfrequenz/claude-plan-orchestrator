@@ -147,6 +147,53 @@ func DefaultConfigPath() string {
 	return filepath.Join(home, ".config", "claude-orchestrator", "config.toml")
 }
 
+// LocalConfigName is the name of the local config file
+const LocalConfigName = ".claude-orchestrator.toml"
+
+// FindLocalConfig searches for a local config file in the current directory
+// and parent directories up to the filesystem root.
+// Returns the path if found, empty string otherwise.
+func FindLocalConfig() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	for {
+		configPath := filepath.Join(dir, LocalConfigName)
+		if _, err := os.Stat(configPath); err == nil {
+			return configPath
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root
+			break
+		}
+		dir = parent
+	}
+
+	return ""
+}
+
+// LoadWithLocalFallback loads config with the following precedence:
+// 1. Explicit path (if provided)
+// 2. Local config (.claude-orchestrator.toml in current or parent directories)
+// 3. Global config (~/.config/claude-orchestrator/config.toml)
+func LoadWithLocalFallback(explicitPath string) (*Config, error) {
+	if explicitPath != "" {
+		return Load(explicitPath)
+	}
+
+	// Try local config first
+	if localPath := FindLocalConfig(); localPath != "" {
+		return Load(localPath)
+	}
+
+	// Fall back to global config
+	return Load(DefaultConfigPath())
+}
+
 // Save writes the configuration to a TOML file
 func (c *Config) Save(path string) error {
 	// Ensure parent directory exists

@@ -85,3 +85,98 @@ func TestConfig_BuildPoolDefaults(t *testing.T) {
 		t.Error("local fallback should be enabled by default")
 	}
 }
+
+func TestFindLocalConfig(t *testing.T) {
+	// Create a temp directory structure
+	root := t.TempDir()
+	subdir := filepath.Join(root, "sub", "dir")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create local config in root
+	localConfig := filepath.Join(root, LocalConfigName)
+	if err := os.WriteFile(localConfig, []byte("[general]\nproject_root = \"/local\""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Save current dir and change to subdir
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+
+	if err := os.Chdir(subdir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should find config in parent
+	found := FindLocalConfig()
+	if found != localConfig {
+		t.Errorf("FindLocalConfig() = %q, want %q", found, localConfig)
+	}
+}
+
+func TestFindLocalConfig_NotFound(t *testing.T) {
+	// Create a temp directory without any config
+	root := t.TempDir()
+
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+
+	found := FindLocalConfig()
+	if found != "" {
+		t.Errorf("FindLocalConfig() = %q, want empty string", found)
+	}
+}
+
+func TestLoadWithLocalFallback_ExplicitPath(t *testing.T) {
+	dir := t.TempDir()
+	explicitPath := filepath.Join(dir, "explicit.toml")
+
+	content := `[general]
+project_root = "/explicit"
+`
+	if err := os.WriteFile(explicitPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWithLocalFallback(explicitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.General.ProjectRoot != "/explicit" {
+		t.Errorf("ProjectRoot = %q, want /explicit", cfg.General.ProjectRoot)
+	}
+}
+
+func TestLoadWithLocalFallback_LocalConfig(t *testing.T) {
+	root := t.TempDir()
+	localConfig := filepath.Join(root, LocalConfigName)
+
+	content := `[general]
+project_root = "/from-local"
+`
+	if err := os.WriteFile(localConfig, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWithLocalFallback("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.General.ProjectRoot != "/from-local" {
+		t.Errorf("ProjectRoot = %q, want /from-local", cfg.General.ProjectRoot)
+	}
+}

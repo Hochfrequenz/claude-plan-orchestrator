@@ -124,11 +124,7 @@ func init() {
 }
 
 func loadConfig() (*config.Config, error) {
-	path := configPath
-	if path == "" {
-		path = config.DefaultConfigPath()
-	}
-	return config.Load(path)
+	return config.LoadWithLocalFallback(configPath)
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
