@@ -183,6 +183,12 @@ func applyVerbosityFilter(result *buildprotocol.JobResult, verbosity string) *bu
 	// Keep backwards-compat Output field
 	filtered.Output = filtered.Stdout + filtered.Stderr
 
+	// If filtering resulted in empty output but original had content (e.g., error message),
+	// preserve the original output to avoid losing error information
+	if filtered.Output == "" && result.Output != "" {
+		filtered.Output = result.Output
+	}
+
 	return filtered
 }
 

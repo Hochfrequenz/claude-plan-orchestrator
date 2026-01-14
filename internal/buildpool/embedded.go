@@ -64,10 +64,12 @@ func (e *EmbeddedWorker) Run(job *buildprotocol.JobMessage) *buildprotocol.JobRe
 	}, nil) // No streaming for embedded worker
 
 	if err != nil {
+		errMsg := "embedded worker error: " + err.Error()
 		return &buildprotocol.JobResult{
 			JobID:    job.JobID,
 			ExitCode: -1,
-			Output:   "embedded worker error: " + err.Error(),
+			Stderr:   errMsg, // Use Stderr so it survives verbosity filtering
+			Output:   errMsg, // Keep Output for backwards compat
 		}
 	}
 

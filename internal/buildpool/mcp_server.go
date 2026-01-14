@@ -486,12 +486,24 @@ func (s *MCPServer) handleRequest(req map[string]interface{}) map[string]interfa
 			}
 		}
 
+		// Format output with exit code context for clarity
+		output := result.Output
+		if result.ExitCode != 0 {
+			// Prepend exit code info for non-zero exits so users understand the result
+			exitInfo := fmt.Sprintf("[Exit code: %d]\n", result.ExitCode)
+			if output == "" {
+				output = exitInfo + "(no output captured)"
+			} else {
+				output = exitInfo + output
+			}
+		}
+
 		return map[string]interface{}{
 			"jsonrpc": "2.0",
 			"id":      id,
 			"result": map[string]interface{}{
 				"content": []map[string]interface{}{
-					{"type": "text", "text": result.Output},
+					{"type": "text", "text": output},
 				},
 			},
 		}
