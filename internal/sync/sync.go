@@ -10,6 +10,8 @@ import (
 	gosync "sync"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
 )
 
 // Syncer handles status synchronization back to markdown files
@@ -328,4 +330,188 @@ func (s *Syncer) SyncTaskStatus(taskID domain.TaskID, status domain.TaskStatus, 
 
 	// 4. Commit and push
 	return s.gitCommitAndPushLocked(taskID, status, epicFilePath)
+}
+
+// SyncResult contains the result of a two-way sync operation
+type SyncResult struct {
+	MarkdownToDBCount int            // Tasks updated in DB from markdown
+	DBToMarkdownCount int            // Tasks updated in markdown from DB
+	Conflicts         []SyncConflict // Mismatches requiring resolution
+}
+
+// SyncConflict represents a status mismatch between DB and markdown
+type SyncConflict struct {
+	TaskID         string
+	DBStatus       string
+	MarkdownStatus string
+	EpicFilePath   string
+}
+
+// ResolveConflicts applies user resolutions to sync conflicts.
+// resolutions maps taskID to "db" or "markdown" indicating which source wins.
+func (s *Syncer) ResolveConflicts(store *taskstore.Store, resolutions map[string]string) error {
+	for taskID, resolution := range resolutions {
+		// Parse task ID
+		tid, err := domain.ParseTaskID(taskID)
+		if err != nil {
+			return fmt.Errorf("parsing task ID %s: %w", taskID, err)
+		}
+
+		// Get task from DB
+		dbTask, err := store.GetTask(taskID)
+		if err != nil {
+			return fmt.Errorf("getting task %s from DB: %w", taskID, err)
+		}
+
+		switch resolution {
+		case "db":
+			// DB wins: update markdown to match DB
+			if dbTask.FilePath != "" {
+				if err := s.UpdateEpicFrontmatter(dbTask.FilePath, dbTask.Status); err != nil {
+					return fmt.Errorf("updating epic %s: %w", taskID, err)
+				}
+				if err := s.UpdateTaskStatus(tid, dbTask.Status); err != nil {
+					return fmt.Errorf("updating README for %s: %w", taskID, err)
+				}
+			}
+
+		case "markdown":
+			// Markdown wins: update DB to match markdown
+			mdTasks, err := parser.ParsePlansDir(s.plansDir)
+			if err != nil {
+				return fmt.Errorf("parsing plans: %w", err)
+			}
+			for _, mdTask := range mdTasks {
+				if mdTask.ID.String() == taskID {
+					if err := store.UpdateTaskStatus(taskID, mdTask.Status); err != nil {
+						return fmt.Errorf("updating DB for %s: %w", taskID, err)
+					}
+					break
+				}
+			}
+
+		default:
+			return fmt.Errorf("invalid resolution %q for %s (must be 'db' or 'markdown')", resolution, taskID)
+		}
+	}
+
+	return nil
+}
+
+// SyncMarkdownToDB parses all markdown files and upserts them to the database.
+// Returns the number of tasks synced.
+func (s *Syncer) SyncMarkdownToDB(store *taskstore.Store) (int, error) {
+	tasks, err := parser.ParsePlansDir(s.plansDir)
+	if err != nil {
+		return 0, fmt.Errorf("parsing plans: %w", err)
+	}
+
+	for _, task := range tasks {
+		if err := store.UpsertTask(task); err != nil {
+			return 0, fmt.Errorf("upserting %s: %w", task.ID.String(), err)
+		}
+	}
+
+	return len(tasks), nil
+}
+
+// SyncDBToMarkdown updates all markdown files to match database statuses.
+// Returns the number of tasks synced.
+func (s *Syncer) SyncDBToMarkdown(store *taskstore.Store) (int, error) {
+	tasks, err := store.ListTasks(taskstore.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("listing tasks: %w", err)
+	}
+
+	count := 0
+	for _, task := range tasks {
+		if task.FilePath == "" {
+			continue
+		}
+
+		// Update frontmatter
+		if err := s.UpdateEpicFrontmatter(task.FilePath, task.Status); err != nil {
+			// Log but continue - file may not exist
+			continue
+		}
+
+		// Update README
+		if err := s.UpdateTaskStatus(task.ID, task.Status); err != nil {
+			// Log but continue
+			continue
+		}
+
+		count++
+	}
+
+	return count, nil
+}
+
+// TwoWaySync performs a two-way sync between markdown files and the database.
+// Returns conflicts that need manual resolution.
+func (s *Syncer) TwoWaySync(store *taskstore.Store) (*SyncResult, error) {
+	result := &SyncResult{}
+
+	// 1. Parse all markdown files to get their statuses
+	mdTasks, err := parser.ParsePlansDir(s.plansDir)
+	if err != nil {
+		return nil, fmt.Errorf("parsing plans: %w", err)
+	}
+
+	// Build map of markdown statuses
+	mdStatuses := make(map[string]*domain.Task)
+	for _, t := range mdTasks {
+		mdStatuses[t.ID.String()] = t
+	}
+
+	// 2. Get all tasks from database
+	dbTasks, err := store.ListTasks(taskstore.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("listing tasks: %w", err)
+	}
+
+	// Build map of DB statuses
+	dbStatuses := make(map[string]*domain.Task)
+	for _, t := range dbTasks {
+		dbStatuses[t.ID.String()] = t
+	}
+
+	// 3. Compare and categorize
+	// Tasks only in markdown -> sync to DB
+	for id, mdTask := range mdStatuses {
+		if _, exists := dbStatuses[id]; !exists {
+			if err := store.UpsertTask(mdTask); err != nil {
+				return nil, fmt.Errorf("upserting %s: %w", id, err)
+			}
+			result.MarkdownToDBCount++
+		}
+	}
+
+	// Tasks only in DB -> sync to markdown (update frontmatter)
+	for id, dbTask := range dbStatuses {
+		if _, exists := mdStatuses[id]; !exists {
+			// Task in DB but not in markdown - skip (file may have been deleted)
+			_ = dbTask // suppress unused variable warning
+			continue
+		}
+	}
+
+	// Tasks in both -> check for conflicts
+	for id, dbTask := range dbStatuses {
+		mdTask, exists := mdStatuses[id]
+		if !exists {
+			continue
+		}
+
+		if dbTask.Status != mdTask.Status {
+			result.Conflicts = append(result.Conflicts, SyncConflict{
+				TaskID:         id,
+				DBStatus:       string(dbTask.Status),
+				MarkdownStatus: string(mdTask.Status),
+				EpicFilePath:   mdTask.FilePath,
+			})
+		}
+	}
+
+	return result, nil
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
+	isync "github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
 )
 
 var (
@@ -145,6 +146,16 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	}
 
+	// Flash message (sync success/error)
+	if m.syncFlash != "" && time.Now().Before(m.syncFlashExp) {
+		flashStyle := completedStyle
+		if strings.HasPrefix(m.syncFlash, "Error") || strings.HasPrefix(m.syncFlash, "Sync failed") {
+			flashStyle = warningStyle
+		}
+		b.WriteString(flashStyle.Width(m.width).Render(fmt.Sprintf(" %s ", m.syncFlash)))
+		b.WriteString("\n")
+	}
+
 	// Status bar
 	var statusBar string
 
@@ -170,7 +181,7 @@ func (m Model) View() string {
 			statusBar = fmt.Sprintf(" [tab]switch [+/-]max agents %s [q]uit ", mouseHint)
 		}
 	case 3: // Modules
-		statusBar = fmt.Sprintf(" [tab]switch [j/k]scroll [x]run tests %s [q]uit ", mouseHint)
+		statusBar = fmt.Sprintf(" [tab]switch [j/k]scroll [s]sync [x]run tests %s [q]uit ", mouseHint)
 	default:
 		testHint := ""
 		if m.buildPoolStatus == "connected" {
@@ -185,6 +196,57 @@ func (m Model) View() string {
 		}
 	}
 	b.WriteString(statusBarStyle.Width(m.width).Render(statusBar))
+
+	// Render sync modal overlay if visible
+	if m.syncModal.Visible {
+		modal := m.renderSyncModal()
+		if modal != "" {
+			// Center the modal horizontally
+			modalLines := strings.Split(modal, "\n")
+			var centeredModal strings.Builder
+			for _, line := range modalLines {
+				// Calculate padding to center
+				padding := (m.width - lipgloss.Width(line)) / 2
+				if padding < 0 {
+					padding = 0
+				}
+				centeredModal.WriteString(strings.Repeat(" ", padding))
+				centeredModal.WriteString(line)
+				centeredModal.WriteString("\n")
+			}
+			// Add vertical padding and overlay
+			content := b.String()
+			contentLines := strings.Split(content, "\n")
+			modalHeight := len(modalLines)
+			contentHeight := len(contentLines)
+
+			// Calculate vertical position (roughly centered)
+			topPadding := (contentHeight - modalHeight) / 2
+			if topPadding < 2 {
+				topPadding = 2
+			}
+
+			// Rebuild content with modal overlay
+			var result strings.Builder
+			for i, line := range contentLines {
+				if i >= topPadding && i < topPadding+modalHeight {
+					modalLineIdx := i - topPadding
+					if modalLineIdx < len(modalLines) {
+						// Use modal line (already centered)
+						result.WriteString(strings.TrimRight(strings.Split(centeredModal.String(), "\n")[modalLineIdx], " "))
+					} else {
+						result.WriteString(line)
+					}
+				} else {
+					result.WriteString(line)
+				}
+				if i < len(contentLines)-1 {
+					result.WriteString("\n")
+				}
+			}
+			return result.String()
+		}
+	}
 
 	return b.String()
 }
@@ -1109,4 +1171,109 @@ func (m Model) renderWorkers() string {
 		}
 	}
 	return b.String()
+}
+
+// Modal styles
+var (
+	modalStyle = lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color("205")).
+		Padding(1, 2).
+		Background(lipgloss.Color("235"))
+
+	modalTitleStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("205"))
+
+	modalSelectedStyle = lipgloss.NewStyle().
+		Background(lipgloss.Color("240")).
+		Foreground(lipgloss.Color("255"))
+
+	resolvedDBStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("42")).
+		Bold(true)
+
+	resolvedMarkdownStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Bold(true)
+)
+
+// renderSyncModal renders the sync conflict resolution modal
+func (m Model) renderSyncModal() string {
+	if !m.syncModal.Visible || len(m.syncModal.Conflicts) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+
+	// Title
+	b.WriteString(modalTitleStyle.Render("SYNC CONFLICTS"))
+	b.WriteString("\n\n")
+
+	// Instructions
+	b.WriteString(queuedStyle.Render("Resolve conflicts: [d]database [m]markdown [a]all-db"))
+	b.WriteString("\n")
+	b.WriteString(queuedStyle.Render("[j/k]navigate [enter]apply [esc]cancel"))
+	b.WriteString("\n\n")
+
+	// Count resolved
+	resolvedCount := 0
+	for _, c := range m.syncModal.Conflicts {
+		if m.syncModal.Resolutions[c.TaskID] != "" {
+			resolvedCount++
+		}
+	}
+	b.WriteString(queuedStyle.Render(fmt.Sprintf("Resolved: %d/%d", resolvedCount, len(m.syncModal.Conflicts))))
+	b.WriteString("\n\n")
+
+	// Conflicts list
+	for i, conflict := range m.syncModal.Conflicts {
+		selected := i == m.syncModal.Selected
+		resolution := m.syncModal.Resolutions[conflict.TaskID]
+
+		// Format the conflict line
+		line := renderConflictLine(conflict, resolution, selected)
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	// Wrap in modal style
+	modalContent := b.String()
+
+	// Calculate modal dimensions
+	modalWidth := 60
+	if m.width > 70 {
+		modalWidth = 60
+	} else if m.width > 50 {
+		modalWidth = m.width - 10
+	} else {
+		modalWidth = m.width - 4
+	}
+
+	return modalStyle.Width(modalWidth).Render(modalContent)
+}
+
+// renderConflictLine renders a single conflict with its resolution status
+func renderConflictLine(conflict isync.SyncConflict, resolution string, selected bool) string {
+	// Format: TaskID: DBStatus -> MarkdownStatus [RESOLVED: db/md]
+	line := fmt.Sprintf("%-15s │ DB: %-12s │ MD: %-12s",
+		conflict.TaskID,
+		truncate(string(conflict.DBStatus), 12),
+		truncate(string(conflict.MarkdownStatus), 12))
+
+	// Add resolution indicator
+	switch resolution {
+	case "db":
+		line += " " + resolvedDBStyle.Render("[✓ DB]")
+	case "markdown":
+		line += " " + resolvedMarkdownStyle.Render("[✓ MD]")
+	default:
+		line += " " + queuedStyle.Render("[?]")
+	}
+
+	// Highlight if selected
+	if selected {
+		return modalSelectedStyle.Render(line)
+	}
+	return queuedStyle.Render(line)
 }

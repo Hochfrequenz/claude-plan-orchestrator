@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
 )
 
 func TestUpdateREADMEStatus(t *testing.T) {
@@ -214,4 +215,291 @@ func containsString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestTwoWaySync_DetectsConflicts(t *testing.T) {
+	// Setup: create temp dirs and files
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Create epic file with status: complete
+	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
+	content := `---
+status: complete
+---
+
+# E05: Validators
+`
+	os.WriteFile(epicPath, []byte(content), 0644)
+
+	// Create in-memory store with status: in_progress
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		Title:    "Validators",
+		Status:   domain.StatusInProgress,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+	result, err := syncer.TwoWaySync(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Conflicts) != 1 {
+		t.Fatalf("expected 1 conflict, got %d", len(result.Conflicts))
+	}
+
+	c := result.Conflicts[0]
+	if c.TaskID != "technical/E05" {
+		t.Errorf("expected conflict for technical/E05, got %s", c.TaskID)
+	}
+	if c.DBStatus != "in_progress" {
+		t.Errorf("expected DB status in_progress, got %s", c.DBStatus)
+	}
+	if c.MarkdownStatus != "complete" {
+		t.Errorf("expected markdown status complete, got %s", c.MarkdownStatus)
+	}
+}
+
+func TestResolveConflicts_UseDB(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical-module")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Epic file says complete (use parser-expected naming: epic-NN-*.md)
+	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
+	content := `---
+status: complete
+---
+
+# E05: Validators
+`
+	os.WriteFile(epicPath, []byte(content), 0644)
+
+	// README at project root
+	readmePath := filepath.Join(root, "README.md")
+	readme := `# Project
+
+### Technical Module
+
+| Epic | Description | Status |
+|------|-------------|:------:|
+| [E05](docs/plans/technical-module/epic-05-validators.md) | Validators | 🟢 |
+`
+	os.WriteFile(readmePath, []byte(readme), 0644)
+
+	// DB says in_progress
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		Title:    "Validators",
+		Status:   domain.StatusInProgress,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+
+	// Resolve: use DB value (in_progress)
+	resolutions := map[string]string{
+		"technical/E05": "db",
+	}
+	err := syncer.ResolveConflicts(store, resolutions)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify markdown was updated to in_progress
+	updated, _ := os.ReadFile(epicPath)
+	if !strings.Contains(string(updated), "status: in_progress") {
+		t.Errorf("epic should have status: in_progress, got:\n%s", string(updated))
+	}
+
+	// Verify README emoji was updated
+	updatedReadme, _ := os.ReadFile(readmePath)
+	if !strings.Contains(string(updatedReadme), "🟡") {
+		t.Errorf("README should have 🟡, got:\n%s", string(updatedReadme))
+	}
+}
+
+func TestResolveConflicts_UseMarkdown(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical-module")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Epic file says complete (use parser-expected naming: epic-NN-*.md)
+	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
+	content := `---
+status: complete
+---
+
+# E05: Validators
+`
+	os.WriteFile(epicPath, []byte(content), 0644)
+
+	// DB says in_progress
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		Title:    "Validators",
+		Status:   domain.StatusInProgress,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+
+	// Resolve: use markdown value (complete)
+	resolutions := map[string]string{
+		"technical/E05": "markdown",
+	}
+	err := syncer.ResolveConflicts(store, resolutions)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify DB was updated to complete
+	task, _ := store.GetTask("technical/E05")
+	if task.Status != domain.StatusComplete {
+		t.Errorf("DB should have status complete, got %s", task.Status)
+	}
+}
+
+func TestResolveConflicts_InvalidResolution(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical-module")
+	os.MkdirAll(moduleDir, 0755)
+
+	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
+	content := `---
+status: complete
+---
+
+# E05: Validators
+`
+	os.WriteFile(epicPath, []byte(content), 0644)
+
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		Title:    "Validators",
+		Status:   domain.StatusInProgress,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+
+	// Try with invalid resolution value
+	resolutions := map[string]string{
+		"technical/E05": "invalid",
+	}
+	err := syncer.ResolveConflicts(store, resolutions)
+	if err == nil {
+		t.Error("expected error for invalid resolution")
+	}
+	if !strings.Contains(err.Error(), "invalid resolution") {
+		t.Errorf("expected 'invalid resolution' error, got: %v", err)
+	}
+}
+
+func TestSyncMarkdownToDB(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Create two epic files
+	epic1 := filepath.Join(moduleDir, "epic-01-setup.md")
+	os.WriteFile(epic1, []byte("---\nstatus: complete\n---\n\n# E01: Setup\n"), 0644)
+
+	epic2 := filepath.Join(moduleDir, "epic-02-feature.md")
+	os.WriteFile(epic2, []byte("---\nstatus: in_progress\n---\n\n# E02: Feature\n"), 0644)
+
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+
+	syncer := New(plansDir)
+	count, err := syncer.SyncMarkdownToDB(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 2 {
+		t.Errorf("expected 2 tasks synced, got %d", count)
+	}
+
+	// Verify tasks are in DB
+	task1, _ := store.GetTask("technical/E01")
+	if task1 == nil || task1.Status != domain.StatusComplete {
+		t.Error("E01 should be complete in DB")
+	}
+
+	task2, _ := store.GetTask("technical/E02")
+	if task2 == nil || task2.Status != domain.StatusInProgress {
+		t.Error("E02 should be in_progress in DB")
+	}
+}
+
+func TestSyncDBToMarkdown(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Create epic file with not_started
+	epicPath := filepath.Join(moduleDir, "epic-01-setup.md")
+	os.WriteFile(epicPath, []byte("---\nstatus: not_started\n---\n\n# E01: Setup\n"), 0644)
+
+	// Create README
+	readmePath := filepath.Join(root, "README.md")
+	readme := `# Project
+
+### Technical Module
+
+| Epic | Description | Status |
+|------|-------------|:------:|
+| [E01](docs/plans/technical/epic-01-setup.md) | Setup | 🔴 |
+`
+	os.WriteFile(readmePath, []byte(readme), 0644)
+
+	// DB has it as complete
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 1},
+		Title:    "Setup",
+		Status:   domain.StatusComplete,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+	count, err := syncer.SyncDBToMarkdown(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 1 {
+		t.Errorf("expected 1 task synced, got %d", count)
+	}
+
+	// Verify epic frontmatter updated
+	updated, _ := os.ReadFile(epicPath)
+	if !strings.Contains(string(updated), "status: complete") {
+		t.Errorf("epic should have status: complete, got:\n%s", string(updated))
+	}
+
+	// Verify README updated
+	updatedReadme, _ := os.ReadFile(readmePath)
+	if !strings.Contains(string(updatedReadme), "🟢") {
+		t.Errorf("README should have 🟢, got:\n%s", string(updatedReadme))
+	}
 }

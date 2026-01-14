@@ -17,6 +17,8 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
+	isync "github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
 )
 
 // TestCompleteMsg is sent when test execution completes
@@ -87,10 +89,89 @@ type WorkerTestMsg struct {
 	Error   string
 }
 
+// SyncCompleteMsg reports sync completion
+type SyncCompleteMsg struct {
+	Result *isync.SyncResult
+	Err    error
+}
+
+// SyncResolveMsg reports conflict resolution completion
+type SyncResolveMsg struct {
+	Err error
+}
+
 // Update handles messages
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle sync modal keys first (before any other keys)
+		if m.syncModal.Visible {
+			switch msg.String() {
+			case "d":
+				// Resolve current conflict as "db"
+				if m.syncModal.Selected < len(m.syncModal.Conflicts) {
+					taskID := m.syncModal.Conflicts[m.syncModal.Selected].TaskID
+					m.syncModal.Resolutions[taskID] = "db"
+				}
+				return m, nil
+			case "m":
+				// Resolve current conflict as "markdown"
+				if m.syncModal.Selected < len(m.syncModal.Conflicts) {
+					taskID := m.syncModal.Conflicts[m.syncModal.Selected].TaskID
+					m.syncModal.Resolutions[taskID] = "markdown"
+				}
+				return m, nil
+			case "a":
+				// Resolve all as "db"
+				for _, c := range m.syncModal.Conflicts {
+					m.syncModal.Resolutions[c.TaskID] = "db"
+				}
+				return m, nil
+			case "j", "down":
+				if m.syncModal.Selected < len(m.syncModal.Conflicts)-1 {
+					m.syncModal.Selected++
+				}
+				return m, nil
+			case "k", "up":
+				if m.syncModal.Selected > 0 {
+					m.syncModal.Selected--
+				}
+				return m, nil
+			case "enter":
+				// Apply resolutions if all conflicts are resolved
+				allResolved := true
+				for _, c := range m.syncModal.Conflicts {
+					if m.syncModal.Resolutions[c.TaskID] == "" {
+						allResolved = false
+						break
+					}
+				}
+				if allResolved {
+					m.syncModal.Visible = false
+					m.statusMsg = "Applying resolutions..."
+					// Copy resolutions to avoid race conditions
+					resCopy := make(map[string]string, len(m.syncModal.Resolutions))
+					for k, v := range m.syncModal.Resolutions {
+						resCopy[k] = v
+					}
+					return m, applyResolutionsCmd(m.syncer, m.store, resCopy)
+				}
+				m.statusMsg = "Please resolve all conflicts before applying"
+				return m, nil
+			case "esc":
+				// Cancel and close modal
+				m.syncModal.Visible = false
+				m.syncModal.Conflicts = nil
+				m.syncModal.Resolutions = make(map[string]string)
+				m.syncModal.Selected = 0
+				m.statusMsg = "Sync cancelled"
+				return m, nil
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil // Consume all other keys when modal is open
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -273,6 +354,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.statusMsg = "No tasks queued"
 				}
+			} else if m.activeTab == 3 && !m.syncModal.Visible && m.syncer != nil && m.store != nil {
+				// Sync (only on Modules tab when not already syncing)
+				m.statusMsg = "Syncing..."
+				return m, startSyncCmd(m.syncer, m.store)
+			} else if m.activeTab == 3 && (m.syncer == nil || m.store == nil) {
+				m.statusMsg = "Sync not available (no plans directory or database)"
 			}
 		case "p":
 			// Pause/Resume batch (only on Dashboard tab)
@@ -571,6 +658,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.statusMsg = fmt.Sprintf("Batch started: %d task(s)", msg.Count)
+		}
+		return m, nil
+
+	case SyncCompleteMsg:
+		if msg.Err != nil {
+			m.statusMsg = fmt.Sprintf("Sync failed: %v", msg.Err)
+		} else if len(msg.Result.Conflicts) > 0 {
+			// Show conflict modal
+			m.syncModal.Visible = true
+			m.syncModal.Conflicts = msg.Result.Conflicts
+			m.syncModal.Resolutions = make(map[string]string)
+			m.syncModal.Selected = 0
+			m.statusMsg = fmt.Sprintf("%d conflict(s) found", len(msg.Result.Conflicts))
+		} else {
+			// Success - show flash
+			total := msg.Result.MarkdownToDBCount + msg.Result.DBToMarkdownCount
+			if total > 0 {
+				m.syncFlash = fmt.Sprintf("Synced %d task(s) ✓", total)
+			} else {
+				m.syncFlash = "Already in sync ✓"
+			}
+			m.syncFlashExp = time.Now().Add(2 * time.Second)
+			m.statusMsg = ""
+		}
+		return m, nil
+
+	case SyncResolveMsg:
+		if msg.Err != nil {
+			m.statusMsg = fmt.Sprintf("Resolution failed: %v", msg.Err)
+		} else {
+			m.syncFlash = "Conflicts resolved ✓"
+			m.syncFlashExp = time.Now().Add(2 * time.Second)
+			m.statusMsg = ""
+			// Recompute module summaries
+			m.modules = computeModuleSummaries(m.allTasks)
 		}
 		return m, nil
 	}
@@ -1027,4 +1149,23 @@ func getExternalHost() string {
 
 	// Last resort - return localhost (will likely fail for remote workers)
 	return "localhost"
+}
+
+// startSyncCmd initiates a two-way sync
+func startSyncCmd(syncer *isync.Syncer, store *taskstore.Store) tea.Cmd {
+	return func() tea.Msg {
+		result, err := syncer.TwoWaySync(store)
+		return SyncCompleteMsg{Result: result, Err: err}
+	}
+}
+
+// applyResolutionsCmd applies conflict resolutions
+func applyResolutionsCmd(syncer *isync.Syncer, store *taskstore.Store, resolutions map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		if syncer == nil || store == nil {
+			return SyncResolveMsg{Err: fmt.Errorf("syncer or store is nil")}
+		}
+		err := syncer.ResolveConflicts(store, resolutions)
+		return SyncResolveMsg{Err: err}
+	}
 }
