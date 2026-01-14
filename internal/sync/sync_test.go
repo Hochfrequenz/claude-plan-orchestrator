@@ -410,3 +410,41 @@ status: complete
 		t.Errorf("expected 'invalid resolution' error, got: %v", err)
 	}
 }
+
+func TestSyncMarkdownToDB(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Create two epic files
+	epic1 := filepath.Join(moduleDir, "epic-01-setup.md")
+	os.WriteFile(epic1, []byte("---\nstatus: complete\n---\n\n# E01: Setup\n"), 0644)
+
+	epic2 := filepath.Join(moduleDir, "epic-02-feature.md")
+	os.WriteFile(epic2, []byte("---\nstatus: in_progress\n---\n\n# E02: Feature\n"), 0644)
+
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+
+	syncer := New(plansDir)
+	count, err := syncer.SyncMarkdownToDB(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 2 {
+		t.Errorf("expected 2 tasks synced, got %d", count)
+	}
+
+	// Verify tasks are in DB
+	task1, _ := store.GetTask("technical/E01")
+	if task1 == nil || task1.Status != domain.StatusComplete {
+		t.Error("E01 should be complete in DB")
+	}
+
+	task2, _ := store.GetTask("technical/E02")
+	if task2 == nil || task2.Status != domain.StatusInProgress {
+		t.Error("E02 should be in_progress in DB")
+	}
+}

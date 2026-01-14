@@ -398,6 +398,23 @@ func (s *Syncer) ResolveConflicts(store *taskstore.Store, resolutions map[string
 	return nil
 }
 
+// SyncMarkdownToDB parses all markdown files and upserts them to the database.
+// Returns the number of tasks synced.
+func (s *Syncer) SyncMarkdownToDB(store *taskstore.Store) (int, error) {
+	tasks, err := parser.ParsePlansDir(s.plansDir)
+	if err != nil {
+		return 0, fmt.Errorf("parsing plans: %w", err)
+	}
+
+	for _, task := range tasks {
+		if err := store.UpsertTask(task); err != nil {
+			return 0, fmt.Errorf("upserting %s: %w", task.ID.String(), err)
+		}
+	}
+
+	return len(tasks), nil
+}
+
 // TwoWaySync performs a two-way sync between markdown files and the database.
 // Returns conflicts that need manual resolution.
 func (s *Syncer) TwoWaySync(store *taskstore.Store) (*SyncResult, error) {
