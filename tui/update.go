@@ -419,11 +419,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "A":
 			// Run agent test (Dashboard tab) - spawns Claude to test MCP tools
-			if m.activeTab == 0 && m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
-				m.statusMsg = "Starting agent test (this may take a minute)..."
-				return m, runAgentTestCmd(m.buildPoolURL, m.projectRoot)
-			} else if m.buildPoolStatus != "connected" {
-				m.statusMsg = "Build pool not connected - start coordinator first"
+			if m.activeTab == 0 {
+				if m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
+					// Use external coordinator
+					m.statusMsg = "Starting agent test via coordinator..."
+					return m, runAgentTestCmd(m.buildPoolURL, m.projectRoot)
+				} else {
+					// Start temporary coordinator with embedded worker
+					m.statusMsg = "Starting agent test with embedded worker..."
+					return m, runAgentTestWithEmbeddedCmd(m.projectRoot)
+				}
 			}
 		case "M":
 			// Toggle mouse mode (allows text selection when disabled)
@@ -1371,7 +1376,7 @@ func applyResolutionsCmd(syncer *isync.Syncer, store *taskstore.Store, resolutio
 	}
 }
 
-// runAgentTestCmd spawns a Claude agent to test the build pool MCP tools
+// runAgentTestCmd spawns a Claude agent to test the build pool MCP tools via external coordinator
 func runAgentTestCmd(buildPoolURL, projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -1384,6 +1389,28 @@ func runAgentTestCmd(buildPoolURL, projectRoot string) tea.Cmd {
 		}
 
 		result, err := buildpool.RunTestAgent(ctx, config, nil)
+		if err != nil {
+			return AgentTestMsg{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+
+		return AgentTestMsg{
+			Success: result.Success,
+			Output:  result.Output,
+			Error:   result.Error,
+		}
+	}
+}
+
+// runAgentTestWithEmbeddedCmd spawns a Claude agent with a temporary embedded coordinator
+func runAgentTestWithEmbeddedCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		result, err := buildpool.RunTestAgentWithEmbeddedCoordinator(ctx, projectRoot, false, nil)
 		if err != nil {
 			return AgentTestMsg{
 				Success: false,

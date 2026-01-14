@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -261,6 +263,64 @@ func createTestMCPConfig(config TestAgentConfig) (string, func(), error) {
 	}
 
 	return tmpFile.Name(), cleanup, nil
+}
+
+// RunTestAgentWithEmbeddedCoordinator starts a temporary coordinator with embedded worker,
+// runs the agent test, then shuts down the coordinator. Use this when no external coordinator
+// is available.
+func RunTestAgentWithEmbeddedCoordinator(ctx context.Context, projectRoot string, verbose bool, onOutput TestAgentOutputCallback) (*TestAgentResult, error) {
+	// Create worktree directory for embedded worker
+	worktreeDir, err := os.MkdirTemp("", "agent-test-worktrees-")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp worktree dir: %w", err)
+	}
+	defer os.RemoveAll(worktreeDir)
+
+	// Set up the full stack
+	registry := NewRegistry()
+
+	// Create real embedded worker
+	embedded := NewEmbeddedWorker(EmbeddedConfig{
+		RepoDir:     projectRoot,
+		WorktreeDir: worktreeDir,
+		MaxJobs:     2,
+		UseNixShell: false, // Don't require nix for tests
+	})
+
+	// Create dispatcher with embedded worker
+	dispatcher := NewDispatcher(registry, embedded.Run)
+	dispatcher.SetLocalRepoPath(projectRoot)
+
+	// Create coordinator
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Create HTTP handler with coordinator endpoints
+	mux := createCoordinatorMux(coord)
+
+	// Start test server (automatically handles port allocation and cleanup)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	buildPoolURL := server.URL
+
+	// Now run the agent test against this coordinator
+	config := TestAgentConfig{
+		BuildPoolURL: buildPoolURL,
+		ProjectRoot:  projectRoot,
+		Verbose:      verbose,
+	}
+
+	return RunTestAgent(ctx, config, onOutput)
+}
+
+// createCoordinatorMux creates an HTTP handler with all coordinator endpoints
+func createCoordinatorMux(coord *Coordinator) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", coord.HandleWebSocket)
+	mux.HandleFunc("/status", coord.HandleStatus)
+	mux.HandleFunc("/job", coord.HandleJobSubmit)
+	mux.HandleFunc("/logs/", coord.HandleGetLogs)
+	return mux
 }
 
 // QuickTest runs a quick test without a full agent - just HTTP calls
