@@ -105,6 +105,7 @@ type Model struct {
 	syncFlash    string
 	syncFlashExp time.Time
 	store        *taskstore.Store
+	syncer       *isync.Syncer
 }
 
 // AgentView represents an agent in the TUI
@@ -154,7 +155,8 @@ type ModelConfig struct {
 	RecoveredAgents []*AgentView // Agents recovered from previous session
 	PlanWatcher     *observer.PlanWatcher
 	PlanChangeChan  chan PlanSyncMsg
-	Store           *taskstore.Store // Database store for sync operations
+	Store           *taskstore.Store  // Database store for sync operations
+	Syncer          *isync.Syncer     // Syncer for two-way sync operations
 }
 
 // NewModel creates a new TUI model
@@ -189,9 +191,12 @@ func NewModel(cfg ModelConfig) Model {
 		agentMgr = executor.NewAgentManager(cfg.MaxActive)
 	}
 
-	// Set up syncer for agent manager if plans directory is configured
-	if cfg.PlansDir != "" {
-		syncer := isync.New(cfg.PlansDir)
+	// Set up syncer for agent manager and model if plans directory is configured
+	syncer := cfg.Syncer
+	if syncer == nil && cfg.PlansDir != "" {
+		syncer = isync.New(cfg.PlansDir)
+	}
+	if syncer != nil {
 		agentMgr.SetSyncer(syncer)
 	}
 
@@ -244,6 +249,7 @@ func NewModel(cfg ModelConfig) Model {
 		statusMsg:       statusMsg,
 		mouseEnabled:    true,
 		store:           cfg.Store,
+		syncer:          syncer,
 		syncModal:       SyncConflictModal{Resolutions: make(map[string]string)},
 	}
 }
