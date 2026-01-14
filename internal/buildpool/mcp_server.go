@@ -27,7 +27,8 @@ type MCPServer struct {
 	dispatcher  *Dispatcher
 	registry    *Registry
 	coordinator *Coordinator
-	repoURL     string
+	repoURL     string // Remote URL (for remote workers)
+	localRepo   string // Local worktree path (for embedded worker)
 	commit      string
 }
 
@@ -57,6 +58,12 @@ func NewMCPServer(config MCPServerConfig, dispatcher *Dispatcher, registry *Regi
 	// Get repo URL and commit from worktree
 	s.loadRepoInfo()
 
+	// Set local repo path on dispatcher for embedded worker
+	// This allows embedded worker to use local path instead of remote URL
+	if dispatcher != nil && s.localRepo != "" {
+		dispatcher.SetLocalRepoPath(s.localRepo)
+	}
+
 	return s
 }
 
@@ -79,12 +86,15 @@ func (s *MCPServer) loadRepoInfo() {
 		s.commit = strings.TrimSpace(string(out))
 	}
 
-	// Get remote URL
+	// Get remote URL (for remote workers if ever connected)
 	cmd = exec.Command("git", "remote", "get-url", "origin")
 	cmd.Dir = s.config.WorktreePath
 	if out, err := cmd.Output(); err == nil {
 		s.repoURL = strings.TrimSpace(string(out))
 	}
+
+	// Store local repo path (for embedded worker - avoids fetch for unpushed commits)
+	s.localRepo = s.config.WorktreePath
 }
 
 // ListTools returns available tools
@@ -280,6 +290,8 @@ func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildpr
 	}
 
 	// Create job
+	// Use remote URL for jobs - remote workers need it to fetch
+	// The embedded worker will substitute local path via dispatcher
 	jobID := fmt.Sprintf("mcp-%s", randomJobSuffix())
 	job := &buildprotocol.JobMessage{
 		JobID:   jobID,

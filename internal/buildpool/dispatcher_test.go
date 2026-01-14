@@ -73,6 +73,74 @@ func TestDispatcher_DispatchToWorker(t *testing.T) {
 	}
 }
 
+func TestDispatcher_EmbeddedWorkerUsesLocalRepoPath(t *testing.T) {
+	reg := NewRegistry()
+
+	// Track what repo was passed to embedded worker
+	var receivedRepo string
+	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+		receivedRepo = job.Repo
+		return &buildprotocol.JobResult{JobID: job.JobID, ExitCode: 0}
+	}
+
+	disp := NewDispatcher(reg, embedded)
+	disp.SetLocalRepoPath("/home/user/project") // Set local path
+
+	job := &buildprotocol.JobMessage{
+		JobID:   "job-1",
+		Repo:    "https://github.com/user/project.git", // Remote URL
+		Commit:  "abc123",
+		Command: "cargo test",
+	}
+
+	resultCh := disp.Submit(job)
+	disp.TryDispatch()
+
+	// Wait for result
+	result := <-resultCh
+
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+
+	// Verify embedded worker received local path, not remote URL
+	if receivedRepo != "/home/user/project" {
+		t.Errorf("embedded worker got repo=%q, want /home/user/project", receivedRepo)
+	}
+}
+
+func TestDispatcher_EmbeddedWorkerFallsBackToRemoteURL(t *testing.T) {
+	reg := NewRegistry()
+
+	// Track what repo was passed to embedded worker
+	var receivedRepo string
+	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+		receivedRepo = job.Repo
+		return &buildprotocol.JobResult{JobID: job.JobID, ExitCode: 0}
+	}
+
+	disp := NewDispatcher(reg, embedded)
+	// Don't set local repo path - should use remote URL
+
+	job := &buildprotocol.JobMessage{
+		JobID:   "job-1",
+		Repo:    "https://github.com/user/project.git",
+		Commit:  "abc123",
+		Command: "cargo test",
+	}
+
+	resultCh := disp.Submit(job)
+	disp.TryDispatch()
+
+	// Wait for result
+	<-resultCh
+
+	// Verify embedded worker received remote URL when no local path set
+	if receivedRepo != "https://github.com/user/project.git" {
+		t.Errorf("embedded worker got repo=%q, want https://github.com/user/project.git", receivedRepo)
+	}
+}
+
 func TestDispatcher_Cancel(t *testing.T) {
 	registry := NewRegistry()
 	dispatcher := NewDispatcher(registry, nil)

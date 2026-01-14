@@ -32,6 +32,9 @@ type Dispatcher struct {
 	sendFunc   SendFunc
 	cancelFunc CancelFunc
 
+	// Local repo path for embedded worker (avoids fetch for unpushed commits)
+	localRepoPath string
+
 	queue   []*PendingJob
 	pending map[string]*PendingJob // jobID -> pending job
 	mu      sync.Mutex
@@ -54,6 +57,13 @@ func (d *Dispatcher) SetSendFunc(fn SendFunc) {
 // SetCancelFunc sets the function used to cancel jobs on workers
 func (d *Dispatcher) SetCancelFunc(fn CancelFunc) {
 	d.cancelFunc = fn
+}
+
+// SetLocalRepoPath sets the local repo path for embedded worker
+// This allows embedded worker to use local path instead of remote URL
+// for unpushed commits
+func (d *Dispatcher) SetLocalRepoPath(path string) {
+	d.localRepoPath = path
 }
 
 // Submit adds a job to the queue and returns a channel for the result
@@ -113,10 +123,17 @@ func (d *Dispatcher) TryDispatch() {
 			}
 		} else if d.embedded != nil && d.registry.Count() == 0 {
 			// No workers, use embedded
-			go func(pj *PendingJob) {
-				result := d.embedded(pj.Job)
+			// Substitute local repo path if available (avoids fetch for unpushed commits)
+			job := pj.Job
+			if d.localRepoPath != "" {
+				jobCopy := *pj.Job
+				jobCopy.Repo = d.localRepoPath
+				job = &jobCopy
+			}
+			go func(pj *PendingJob, job *buildprotocol.JobMessage) {
+				result := d.embedded(job)
 				d.Complete(pj.Job.JobID, result)
-			}(pj)
+			}(pj, job)
 		} else {
 			// No available workers, keep in queue
 			remaining = append(remaining, pj)
