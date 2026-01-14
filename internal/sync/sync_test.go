@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
 )
 
 func TestUpdateREADMEStatus(t *testing.T) {
@@ -214,4 +215,53 @@ func containsString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestTwoWaySync_DetectsConflicts(t *testing.T) {
+	// Setup: create temp dirs and files
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Create epic file with status: complete
+	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
+	content := `---
+status: complete
+---
+
+# E05: Validators
+`
+	os.WriteFile(epicPath, []byte(content), 0644)
+
+	// Create in-memory store with status: in_progress
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		Title:    "Validators",
+		Status:   domain.StatusInProgress,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+	result, err := syncer.TwoWaySync(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Conflicts) != 1 {
+		t.Fatalf("expected 1 conflict, got %d", len(result.Conflicts))
+	}
+
+	c := result.Conflicts[0]
+	if c.TaskID != "technical/E05" {
+		t.Errorf("expected conflict for technical/E05, got %s", c.TaskID)
+	}
+	if c.DBStatus != "in_progress" {
+		t.Errorf("expected DB status in_progress, got %s", c.DBStatus)
+	}
+	if c.MarkdownStatus != "complete" {
+		t.Errorf("expected markdown status complete, got %s", c.MarkdownStatus)
+	}
 }
