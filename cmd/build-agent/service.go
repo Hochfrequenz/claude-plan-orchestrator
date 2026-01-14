@@ -31,16 +31,9 @@ ExecStart={{.ExecStart}}
 Restart=always
 RestartSec=10
 
-# Run as dedicated user if it exists, otherwise as root
+# Run as dedicated user if specified
 {{if .User}}User={{.User}}{{end}}
 {{if .Group}}Group={{.Group}}{{end}}
-
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-PrivateTmp=true
-ReadWritePaths={{.GitCacheDir}} {{.WorktreeDir}}
 
 # Resource limits
 LimitNOFILE=65535
@@ -55,11 +48,9 @@ WantedBy=multi-user.target
 `
 
 type unitConfig struct {
-	ExecStart   string
-	User        string
-	Group       string
-	GitCacheDir string
-	WorktreeDir string
+	ExecStart string
+	User      string
+	Group     string
 }
 
 var (
@@ -84,7 +75,6 @@ func newServiceCmd() *cobra.Command {
 The service will be configured to:
 - Start automatically on boot
 - Restart on failure with 10 second delay
-- Use security hardening options
 - Read config from the standard locations
 
 Requires root privileges.`,
@@ -184,11 +174,9 @@ func runServiceInstall(cmd *cobra.Command, args []string) error {
 
 	// Generate unit file
 	cfg := unitConfig{
-		ExecStart:   execStart,
-		User:        serviceUser,
-		Group:       serviceGroup,
-		GitCacheDir: serviceGitCacheDir,
-		WorktreeDir: serviceWorktreeDir,
+		ExecStart: execStart,
+		User:      serviceUser,
+		Group:     serviceGroup,
 	}
 
 	tmpl, err := template.New("unit").Parse(systemdUnitTemplate)
