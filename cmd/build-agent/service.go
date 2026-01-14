@@ -35,6 +35,9 @@ RestartSec=10
 {{if .User}}User={{.User}}{{end}}
 {{if .Group}}Group={{.Group}}{{end}}
 
+# Environment - include nix and common paths
+Environment="PATH=/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin:/usr/local/bin:/usr/bin:/bin"
+
 # Resource limits
 LimitNOFILE=65535
 
