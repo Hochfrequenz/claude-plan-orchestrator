@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,6 +11,14 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	isync "github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
+)
+
+// testAgentOutput stores streaming output from the test agent
+// Protected by testAgentMutex for concurrent access
+var (
+	testAgentMutex  sync.Mutex
+	testAgentOutput []string
+	testAgentTaskID string
 )
 
 // ViewMode determines how tasks are displayed

@@ -100,6 +100,12 @@ type AgentTestMsg struct {
 	Error   string
 }
 
+// AgentTestOutputMsg reports streaming output from the agent test
+type AgentTestOutputMsg struct {
+	TaskID string
+	Lines  []string
+}
+
 // SyncCompleteMsg reports sync completion
 type SyncCompleteMsg struct {
 	Result *isync.SyncResult
@@ -249,7 +255,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle agent detail view (only on Agents tab)
 			if m.activeTab == 2 && len(m.agents) > 0 {
 				m.showAgentDetail = !m.showAgentDetail
-				m.agentOutputScroll = -1 // Start at bottom (most recent)
+				// For running agents, show bottom (most recent)
+				// For completed/failed agents, show from top (full output)
+				agent := m.agents[m.selectedAgent]
+				if agent.Status == executor.AgentRunning {
+					m.agentOutputScroll = -1 // Start at bottom (most recent)
+				} else {
+					m.agentOutputScroll = 0 // Start at top (see full output)
+				}
 			}
 		case "esc":
 			// Close agent detail view
@@ -522,6 +535,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.agentManager != nil && (m.batchRunning || m.autoMode) {
 			m.updateAgentsFromManager()
 		}
+		// Update test agent output from shared buffer
+		m.updateTestAgentOutput()
 		// Fetch workers if build pool is configured
 		cmds := []tea.Cmd{tickCmd()}
 		if m.buildPoolURL != "" {
@@ -820,6 +835,27 @@ func (m *Model) SetTasks(tasks []*domain.Task) {
 // SetQueued updates the queued tasks list
 func (m *Model) SetQueued(tasks []*domain.Task) {
 	m.queued = tasks
+}
+
+// updateTestAgentOutput copies streaming output from the shared buffer to the test agent
+func (m *Model) updateTestAgentOutput() {
+	testAgentMutex.Lock()
+	taskID := testAgentTaskID
+	output := make([]string, len(testAgentOutput))
+	copy(output, testAgentOutput)
+	testAgentMutex.Unlock()
+
+	if taskID == "" || len(output) == 0 {
+		return
+	}
+
+	// Find the test agent and update its output
+	for i, a := range m.agents {
+		if a.TaskID == taskID && a.Status == executor.AgentRunning {
+			m.agents[i].Output = output
+			break
+		}
+	}
 }
 
 // updateAgentsFromManager syncs the agents view with the agent manager
@@ -1403,13 +1439,32 @@ func runAgentTestCmd(taskID, buildPoolURL, projectRoot string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
+		// Initialize shared buffer for streaming output
+		testAgentMutex.Lock()
+		testAgentOutput = nil
+		testAgentTaskID = taskID
+		testAgentMutex.Unlock()
+
+		// Callback to capture streaming output
+		onOutput := func(line string) {
+			testAgentMutex.Lock()
+			testAgentOutput = append(testAgentOutput, line)
+			testAgentMutex.Unlock()
+		}
+
 		config := buildpool.TestAgentConfig{
 			BuildPoolURL: buildPoolURL,
 			ProjectRoot:  projectRoot,
-			Verbose:      false,
+			Verbose:      true,
 		}
 
-		result, err := buildpool.RunTestAgent(ctx, config, nil)
+		result, err := buildpool.RunTestAgent(ctx, config, onOutput)
+
+		// Clear the task ID when done
+		testAgentMutex.Lock()
+		testAgentTaskID = ""
+		testAgentMutex.Unlock()
+
 		if err != nil {
 			return AgentTestMsg{
 				TaskID:  taskID,
@@ -1433,7 +1488,26 @@ func runAgentTestWithEmbeddedCmd(taskID, projectRoot string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		result, err := buildpool.RunTestAgentWithEmbeddedCoordinator(ctx, projectRoot, false, nil)
+		// Initialize shared buffer for streaming output
+		testAgentMutex.Lock()
+		testAgentOutput = nil
+		testAgentTaskID = taskID
+		testAgentMutex.Unlock()
+
+		// Callback to capture streaming output
+		onOutput := func(line string) {
+			testAgentMutex.Lock()
+			testAgentOutput = append(testAgentOutput, line)
+			testAgentMutex.Unlock()
+		}
+
+		result, err := buildpool.RunTestAgentWithEmbeddedCoordinator(ctx, projectRoot, true, onOutput)
+
+		// Clear the task ID when done
+		testAgentMutex.Lock()
+		testAgentTaskID = ""
+		testAgentMutex.Unlock()
+
 		if err != nil {
 			return AgentTestMsg{
 				TaskID:  taskID,
