@@ -89,9 +89,6 @@ type WorkerTestMsg struct {
 	Error   string
 }
 
-// SyncStartMsg triggers a sync operation
-type SyncStartMsg struct{}
-
 // SyncCompleteMsg reports sync completion
 type SyncCompleteMsg struct {
 	Result *isync.SyncResult
@@ -152,8 +149,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if allResolved {
 					m.syncModal.Visible = false
 					m.statusMsg = "Applying resolutions..."
-					return m, applyResolutionsCmd(m.syncer, m.store, m.syncModal.Resolutions)
+					// Copy resolutions to avoid race conditions
+					resCopy := make(map[string]string, len(m.syncModal.Resolutions))
+					for k, v := range m.syncModal.Resolutions {
+						resCopy[k] = v
+					}
+					return m, applyResolutionsCmd(m.syncer, m.store, resCopy)
 				}
+				m.statusMsg = "Please resolve all conflicts before applying"
 				return m, nil
 			case "esc":
 				// Cancel and close modal
@@ -1159,6 +1162,9 @@ func startSyncCmd(syncer *isync.Syncer, store *taskstore.Store) tea.Cmd {
 // applyResolutionsCmd applies conflict resolutions
 func applyResolutionsCmd(syncer *isync.Syncer, store *taskstore.Store, resolutions map[string]string) tea.Cmd {
 	return func() tea.Msg {
+		if syncer == nil || store == nil {
+			return SyncResolveMsg{Err: fmt.Errorf("syncer or store is nil")}
+		}
 		err := syncer.ResolveConflicts(store, resolutions)
 		return SyncResolveMsg{Err: err}
 	}
