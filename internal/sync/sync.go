@@ -496,13 +496,23 @@ func (s *Syncer) TwoWaySync(store *taskstore.Store) (*SyncResult, error) {
 		}
 	}
 
-	// Tasks in both -> check for conflicts
+	// Tasks in both -> update DB with markdown data (preserving DB status) and check for conflicts
 	for id, dbTask := range dbStatuses {
 		mdTask, exists := mdStatuses[id]
 		if !exists {
 			continue
 		}
 
+		// Always update DB with markdown data (dependencies, title, priority, etc.)
+		// but preserve the DB status since agents may have updated it
+		taskToUpsert := *mdTask
+		taskToUpsert.Status = dbTask.Status // Preserve DB status
+		if err := store.UpsertTask(&taskToUpsert); err != nil {
+			return nil, fmt.Errorf("updating %s: %w", id, err)
+		}
+		result.MarkdownToDBCount++
+
+		// Flag status conflicts for user resolution
 		if dbTask.Status != mdTask.Status {
 			result.Conflicts = append(result.Conflicts, SyncConflict{
 				TaskID:         id,

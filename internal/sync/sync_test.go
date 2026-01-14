@@ -449,6 +449,73 @@ func TestSyncMarkdownToDB(t *testing.T) {
 	}
 }
 
+func TestTwoWaySync_UpdatesDependencies(t *testing.T) {
+	// This test verifies that TwoWaySync updates dependencies in the DB
+	// even when the status matches (regression test for stale dependency bug)
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "pm-tool-module")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Create E01 and E02 (no E00) - this mimics the user's scenario
+	epic1 := filepath.Join(moduleDir, "epic-01-foundation.md")
+	os.WriteFile(epic1, []byte("---\nstatus: not_started\n---\n\n# E01: Foundation\n"), 0644)
+
+	epic2 := filepath.Join(moduleDir, "epic-02-domain.md")
+	os.WriteFile(epic2, []byte("---\nstatus: not_started\n---\n\n# E02: Domain\n"), 0644)
+
+	// Create DB with stale dependencies (E01 depends on non-existent E00)
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+
+	// E01 incorrectly has E00 as dependency (stale data)
+	store.UpsertTask(&domain.Task{
+		ID:        domain.TaskID{Module: "pm-tool", EpicNum: 1},
+		Title:     "Foundation",
+		Status:    domain.StatusNotStarted,
+		DependsOn: []domain.TaskID{{Module: "pm-tool", EpicNum: 0}}, // Stale!
+		FilePath:  epic1,
+	})
+
+	// E02 depends on E01
+	store.UpsertTask(&domain.Task{
+		ID:        domain.TaskID{Module: "pm-tool", EpicNum: 2},
+		Title:     "Domain",
+		Status:    domain.StatusNotStarted,
+		DependsOn: []domain.TaskID{{Module: "pm-tool", EpicNum: 1}},
+		FilePath:  epic2,
+	})
+
+	syncer := New(plansDir)
+	result, err := syncer.TwoWaySync(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have no conflicts (statuses match)
+	if len(result.Conflicts) != 0 {
+		t.Errorf("expected no conflicts, got %d", len(result.Conflicts))
+	}
+
+	// Verify E01's dependencies were updated (should be empty since E00 doesn't exist)
+	task1, _ := store.GetTask("pm-tool/E01")
+	if task1 == nil {
+		t.Fatal("E01 not found in DB")
+	}
+	if len(task1.DependsOn) != 0 {
+		t.Errorf("E01 should have no dependencies (E00 doesn't exist), got %v", task1.DependsOn)
+	}
+
+	// Verify E02 still depends on E01 (since E01 exists)
+	task2, _ := store.GetTask("pm-tool/E02")
+	if task2 == nil {
+		t.Fatal("E02 not found in DB")
+	}
+	if len(task2.DependsOn) != 1 || task2.DependsOn[0].EpicNum != 1 {
+		t.Errorf("E02 should depend on E01, got %v", task2.DependsOn)
+	}
+}
+
 func TestSyncDBToMarkdown(t *testing.T) {
 	root := t.TempDir()
 	plansDir := filepath.Join(root, "docs", "plans")
