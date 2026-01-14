@@ -112,11 +112,11 @@ func (e *Executor) RunJob(ctx context.Context, job Job, onOutput OutputCallback)
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Capture output
+	// Capture output - track stdout and stderr separately for verbosity filtering
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 
-	var output strings.Builder
+	var stdoutBuf, stderrBuf strings.Builder
 
 	if e.config.Debug {
 		log.Printf("[executor] starting command in %s", wtPath)
@@ -128,14 +128,14 @@ func (e *Executor) RunJob(ctx context.Context, job Job, onOutput OutputCallback)
 		log.Printf("[executor] command started with PID %d", cmd.Process.Pid)
 	}
 
-	// Stream output
+	// Stream output - capture to separate buffers
 	done := make(chan struct{})
 	go func() {
-		e.streamOutput(stdout, "stdout", &output, onOutput)
+		e.streamOutput(stdout, "stdout", &stdoutBuf, onOutput)
 		done <- struct{}{}
 	}()
 	go func() {
-		e.streamOutput(stderr, "stderr", &output, onOutput)
+		e.streamOutput(stderr, "stderr", &stderrBuf, onOutput)
 		done <- struct{}{}
 	}()
 
@@ -165,10 +165,15 @@ func (e *Executor) RunJob(ctx context.Context, job Job, onOutput OutputCallback)
 		log.Printf("[executor] job %s finished in %.2fs with exit code %d", job.ID, duration.Seconds(), exitCode)
 	}
 
+	stdoutStr := stdoutBuf.String()
+	stderrStr := stderrBuf.String()
+
 	return &buildprotocol.JobResult{
 		JobID:        job.ID,
 		ExitCode:     exitCode,
-		Output:       output.String(),
+		Output:       stdoutStr + stderrStr, // Combined for backwards compat
+		Stdout:       stdoutStr,              // Separate for verbosity filtering
+		Stderr:       stderrStr,              // Separate for verbosity filtering
 		DurationSecs: duration.Seconds(),
 	}, nil
 }

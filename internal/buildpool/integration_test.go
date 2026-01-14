@@ -1,6 +1,9 @@
 package buildpool
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -101,6 +104,205 @@ func TestVerbosityIntegration(t *testing.T) {
 		}
 		if !strings.Contains(logs.Output, "warning: something") {
 			t.Error("get_job_logs should return stderr")
+		}
+	})
+}
+
+// TestTUILocalWorkerIntegration tests the full stack as used by the TUI:
+// Coordinator + Dispatcher + EmbeddedWorker with a real git repository.
+// This simulates the setup from cmd/claude-orch/commands.go when build pool is enabled.
+func TestTUILocalWorkerIntegration(t *testing.T) {
+	// Create a temporary git repo to simulate the project root
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "project")
+
+	// Initialize git repo
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	cmd := exec.Command("git", "init")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s: %v", out, err)
+	}
+
+	cmd = exec.Command("git", "config", "user.email", "test@test.com")
+	cmd.Dir = repoDir
+	cmd.Run()
+	cmd = exec.Command("git", "config", "user.name", "Test")
+	cmd.Dir = repoDir
+	cmd.Run()
+
+	// Create a test file and commit
+	testFile := filepath.Join(repoDir, "README.md")
+	if err := os.WriteFile(testFile, []byte("# Test Project\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = repoDir
+	cmd.Run()
+
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %s: %v", out, err)
+	}
+
+	// Add an unpushed file (commit exists locally but not pushed to remote)
+	unpushedFile := filepath.Join(repoDir, "UNPUSHED.md")
+	if err := os.WriteFile(unpushedFile, []byte("# Unpushed Content\n"), 0644); err != nil {
+		t.Fatalf("write unpushed file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", "UNPUSHED.md")
+	cmd.Dir = repoDir
+	cmd.Run()
+
+	cmd = exec.Command("git", "commit", "-m", "Add unpushed file")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit unpushed: %s: %v", out, err)
+	}
+
+	// Create worktree directory for the embedded worker
+	worktreeDir := filepath.Join(tmpDir, "worktrees")
+	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+		t.Fatalf("mkdir worktrees: %v", err)
+	}
+
+	// Set up the full stack as done in TUI command
+	registry := NewRegistry()
+
+	// Create real embedded worker (like TUI does)
+	embedded := NewEmbeddedWorker(EmbeddedConfig{
+		RepoDir:     repoDir,
+		WorktreeDir: worktreeDir,
+		MaxJobs:     2,
+		UseNixShell: false, // Don't require nix for tests
+	})
+
+	// Create dispatcher with embedded worker
+	dispatcher := NewDispatcher(registry, embedded.Run)
+
+	// Create coordinator (port 0 = don't actually listen)
+	coord := NewCoordinator(CoordinatorConfig{WebSocketPort: 0}, registry, dispatcher)
+
+	// Create MCP server pointing at the repo
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: repoDir,
+	}, dispatcher, registry)
+	server.SetCoordinator(coord)
+
+	t.Run("run command via MCP tool", func(t *testing.T) {
+		result, err := server.CallTool("run_command", map[string]interface{}{
+			"command":   "cat README.md",
+			"verbosity": "full",
+		})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		t.Logf("Result: ExitCode=%d, Output=%q, Stdout=%q, Stderr=%q",
+			result.ExitCode, result.Output, result.Stdout, result.Stderr)
+
+		if result.ExitCode != 0 {
+			t.Errorf("expected exit code 0, got %d", result.ExitCode)
+		}
+		if !strings.Contains(result.Output, "# Test Project") {
+			t.Errorf("output should contain '# Test Project', got %q", result.Output)
+		}
+		if !strings.Contains(result.Stdout, "# Test Project") {
+			t.Errorf("stdout should contain '# Test Project', got %q", result.Stdout)
+		}
+	})
+
+	t.Run("run command with minimal verbosity", func(t *testing.T) {
+		result, err := server.CallTool("run_command", map[string]interface{}{
+			"command":   "echo 'hello from minimal'",
+			"verbosity": "minimal",
+		})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		t.Logf("Result: ExitCode=%d, Output=%q, Stdout=%q, Stderr=%q",
+			result.ExitCode, result.Output, result.Stdout, result.Stderr)
+
+		if result.ExitCode != 0 {
+			t.Errorf("expected exit code 0, got %d", result.ExitCode)
+		}
+		// Minimal verbosity should not include stdout
+		if result.Stdout != "" {
+			t.Errorf("minimal verbosity should have empty stdout, got %q", result.Stdout)
+		}
+	})
+
+	t.Run("run failing command", func(t *testing.T) {
+		result, err := server.CallTool("run_command", map[string]interface{}{
+			"command":   "exit 42",
+			"verbosity": "full",
+		})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		t.Logf("Result: ExitCode=%d, Output=%q", result.ExitCode, result.Output)
+
+		if result.ExitCode != 42 {
+			t.Errorf("expected exit code 42, got %d", result.ExitCode)
+		}
+	})
+
+	t.Run("worker status shows local fallback active", func(t *testing.T) {
+		result, err := server.CallTool("worker_status", nil)
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		t.Logf("Worker status: %s", result.Output)
+
+		if !strings.Contains(result.Output, "local_fallback_active") {
+			t.Error("worker_status should include local_fallback_active field")
+		}
+		if !strings.Contains(result.Output, "true") {
+			t.Error("local_fallback_active should be true (no remote workers)")
+		}
+	})
+
+	t.Run("run command that writes to stderr", func(t *testing.T) {
+		result, err := server.CallTool("run_command", map[string]interface{}{
+			"command":   "echo 'stdout line' && echo 'stderr line' >&2",
+			"verbosity": "full",
+		})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		t.Logf("Result: ExitCode=%d, Stdout=%q, Stderr=%q",
+			result.ExitCode, result.Stdout, result.Stderr)
+
+		if !strings.Contains(result.Stdout, "stdout line") {
+			t.Errorf("stdout should contain 'stdout line', got %q", result.Stdout)
+		}
+		if !strings.Contains(result.Stderr, "stderr line") {
+			t.Errorf("stderr should contain 'stderr line', got %q", result.Stderr)
+		}
+	})
+
+	t.Run("run command on unpushed changes", func(t *testing.T) {
+		// The unpushed file was created during setup (commit exists locally but not pushed)
+		// This tests that the local worker can access unpushed commits
+		result, err := server.CallTool("run_command", map[string]interface{}{
+			"command":   "cat UNPUSHED.md",
+			"verbosity": "full",
+		})
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		t.Logf("Result: ExitCode=%d, Output=%q", result.ExitCode, result.Output)
+
+		if result.ExitCode != 0 {
+			t.Errorf("expected exit code 0, got %d", result.ExitCode)
+		}
+		if !strings.Contains(result.Output, "# Unpushed Content") {
+			t.Errorf("should read unpushed file content, got %q", result.Output)
 		}
 	})
 }

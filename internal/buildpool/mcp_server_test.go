@@ -3,6 +3,9 @@ package buildpool
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -799,5 +802,207 @@ func TestMCPServer_FallsBackToRemoteURL(t *testing.T) {
 	}
 	if strings.HasPrefix(sentRepo, "git://") {
 		t.Errorf("remote worker got git daemon URL %q when none was configured", sentRepo)
+	}
+}
+
+func TestMCPServer_LocalWorkerWithUnpushedCommits(t *testing.T) {
+	// This test verifies the local embedded worker can handle unpushed commits.
+	// The scenario:
+	// 1. We have a local worktree with an unpushed commit
+	// 2. MCPServer creates a job with the local HEAD commit
+	// 3. The embedded worker should be able to create a worktree from that commit
+	//
+	// This was the bug fixed in d4bb23c: the embedded worker was receiving
+	// a remote URL (https://github.com/...) but the commit wasn't pushed yet,
+	// causing "not our ref" errors when trying to fetch.
+
+	// Create a test repo with an unpushed commit
+	repoDir := t.TempDir()
+	worktreeDir := t.TempDir()
+
+	// Initialize git repo
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup command %v failed: %s: %v", args, out, err)
+		}
+	}
+
+	// Create initial commit
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = repoDir
+	cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = repoDir
+	cmd.Run()
+
+	// Create a new "unpushed" commit
+	if err := os.WriteFile(filepath.Join(repoDir, "unpushed.txt"), []byte("This is unpushed"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = repoDir
+	cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "Unpushed commit")
+	cmd.Dir = repoDir
+	cmd.Run()
+
+	// Get the unpushed commit hash
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoDir
+	commitBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	commit := strings.TrimSpace(string(commitBytes))
+
+	// Create embedded worker with the repo
+	embedded := NewEmbeddedWorker(EmbeddedConfig{
+		RepoDir:     repoDir,
+		WorktreeDir: worktreeDir,
+		MaxJobs:     2,
+		UseNixShell: false,
+	})
+
+	// Create registry and dispatcher with embedded worker
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, embedded.Run)
+	dispatcher.SetLocalRepoPath(repoDir) // This is the key fix
+
+	// Create MCP server pointing to our test repo
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: repoDir,
+	}, dispatcher, registry)
+	// Override the commit to our test commit
+	server.commit = commit
+
+	// Call run_command to verify the unpushed file exists
+	result, err := server.CallTool("run_command", map[string]interface{}{
+		"command":   "cat unpushed.txt",
+		"verbosity": "full",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	// Log full output for debugging
+	t.Logf("Result: ExitCode=%d, Output=%q, Stdout=%q, Stderr=%q",
+		result.ExitCode, result.Output, result.Stdout, result.Stderr)
+
+	if result.ExitCode != 0 {
+		t.Errorf("exit code = %d, want 0. Output: %s", result.ExitCode, result.Output)
+	}
+
+	if !strings.Contains(result.Output, "This is unpushed") {
+		t.Errorf("output should contain unpushed file content, got: %s", result.Output)
+	}
+}
+
+func TestMCPServer_LocalWorkerFromWorktree(t *testing.T) {
+	// This test verifies the local embedded worker can work when MCPServer
+	// is pointed at a git worktree (not the main repo).
+	// The scenario:
+	// 1. We have a main repo with a commit
+	// 2. We create a worktree from that repo
+	// 3. MCPServer points to the worktree
+	// 4. The embedded worker should be able to create ANOTHER worktree from that commit
+
+	// Create main repo
+	mainRepoDir := t.TempDir()
+	worktreeDir := t.TempDir()
+	buildWorktreeDir := t.TempDir()
+
+	// Initialize main repo
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = mainRepoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup command %v failed: %s: %v", args, out, err)
+		}
+	}
+
+	// Create initial commit
+	if err := os.WriteFile(filepath.Join(mainRepoDir, "README.md"), []byte("# Main repo"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = mainRepoDir
+	cmd.Run()
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = mainRepoDir
+	cmd.Run()
+
+	// Create a worktree (simulating the TUI/CLI running from a worktree)
+	worktreePath := filepath.Join(worktreeDir, "feature-branch")
+	cmd = exec.Command("git", "worktree", "add", worktreePath, "HEAD")
+	cmd.Dir = mainRepoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %s: %v", out, err)
+	}
+
+	// Add a new file in the worktree (uncommitted change won't be tested,
+	// but we're testing that the worktree itself works as a source)
+
+	// Get commit from worktree
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = worktreePath
+	commitBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	commit := strings.TrimSpace(string(commitBytes))
+
+	// Create embedded worker pointing to the WORKTREE (not main repo)
+	embedded := NewEmbeddedWorker(EmbeddedConfig{
+		RepoDir:     worktreePath, // Key: pointing to worktree
+		WorktreeDir: buildWorktreeDir,
+		MaxJobs:     2,
+		UseNixShell: false,
+	})
+
+	// Create registry and dispatcher
+	registry := NewRegistry()
+	dispatcher := NewDispatcher(registry, embedded.Run)
+	dispatcher.SetLocalRepoPath(worktreePath) // Key: using worktree path
+
+	// Create MCP server pointing to our worktree
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: worktreePath,
+	}, dispatcher, registry)
+	server.commit = commit
+
+	// Run a command that reads from the repo
+	result, err := server.CallTool("run_command", map[string]interface{}{
+		"command":   "cat README.md",
+		"verbosity": "full",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	// Log full output for debugging
+	t.Logf("Result: ExitCode=%d, Output=%q, Stdout=%q, Stderr=%q",
+		result.ExitCode, result.Output, result.Stdout, result.Stderr)
+
+	if result.ExitCode != 0 {
+		t.Errorf("exit code = %d, want 0. Output: %s", result.ExitCode, result.Output)
+	}
+
+	if !strings.Contains(result.Output, "# Main repo") {
+		t.Errorf("output should contain README content, got: %s", result.Output)
 	}
 }
