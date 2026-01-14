@@ -705,3 +705,99 @@ func TestMCPServer_ToolsHaveVerbosityParam(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPServer_UsesGitDaemonURL(t *testing.T) {
+	registry := NewRegistry()
+
+	// Track what repo URL is sent to remote workers
+	var sentRepo string
+	mockWorker := &ConnectedWorker{
+		ID:      "worker-1",
+		MaxJobs: 4,
+		Slots:   4,
+	}
+	registry.Register(mockWorker)
+
+	dispatcher := NewDispatcher(registry, nil) // No embedded worker
+	dispatcher.SetSendFunc(func(w *ConnectedWorker, job *buildprotocol.JobMessage) error {
+		sentRepo = job.Repo
+		// Simulate immediate completion
+		go func() {
+			dispatcher.Complete(job.JobID, &buildprotocol.JobResult{
+				JobID:    job.JobID,
+				ExitCode: 0,
+				Output:   "success",
+			})
+		}()
+		return nil
+	})
+
+	// Create MCP server with git daemon URL configured
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: ".",
+		GitDaemonURL: "git://buildserver:9418/",
+	}, dispatcher, registry)
+
+	// Call a tool - this should create a job with git daemon URL
+	result, err := server.CallTool("build", nil)
+	if err != nil {
+		t.Fatalf("CallTool build failed: %v", err)
+	}
+
+	// Verify remote worker received the git daemon URL
+	if sentRepo != "git://buildserver:9418/" {
+		t.Errorf("remote worker got repo=%q, want git://buildserver:9418/", sentRepo)
+	}
+
+	if result.ExitCode != 0 {
+		t.Errorf("unexpected exit code %d", result.ExitCode)
+	}
+}
+
+func TestMCPServer_FallsBackToRemoteURL(t *testing.T) {
+	registry := NewRegistry()
+
+	// Track what repo URL is sent to remote workers
+	var sentRepo string
+	mockWorker := &ConnectedWorker{
+		ID:      "worker-1",
+		MaxJobs: 4,
+		Slots:   4,
+	}
+	registry.Register(mockWorker)
+
+	dispatcher := NewDispatcher(registry, nil) // No embedded worker
+	dispatcher.SetSendFunc(func(w *ConnectedWorker, job *buildprotocol.JobMessage) error {
+		sentRepo = job.Repo
+		go func() {
+			dispatcher.Complete(job.JobID, &buildprotocol.JobResult{
+				JobID:    job.JobID,
+				ExitCode: 0,
+				Output:   "success",
+			})
+		}()
+		return nil
+	})
+
+	// Create MCP server WITHOUT git daemon URL configured
+	server := NewMCPServer(MCPServerConfig{
+		WorktreePath: ".",
+		// No GitDaemonURL - should fall back to remote URL from git
+	}, dispatcher, registry)
+
+	// Call a tool
+	_, err := server.CallTool("build", nil)
+	if err != nil {
+		t.Fatalf("CallTool build failed: %v", err)
+	}
+
+	// Verify remote worker received the remote URL (from git remote)
+	// The exact URL depends on the git config, but it should NOT be empty
+	// and should NOT be a git daemon URL
+	if sentRepo == "" {
+		t.Error("remote worker got empty repo URL")
+	}
+	if strings.HasPrefix(sentRepo, "git://") {
+		t.Errorf("remote worker got git daemon URL %q when none was configured", sentRepo)
+	}
+}

@@ -19,6 +19,7 @@ import (
 // MCPServerConfig configures the MCP server
 type MCPServerConfig struct {
 	WorktreePath string
+	GitDaemonURL string // Git daemon URL for remote workers (e.g., "git://host:9418/")
 }
 
 // MCPServer implements the MCP protocol for build tools
@@ -290,12 +291,18 @@ func (s *MCPServer) CallTool(name string, args map[string]interface{}) (*buildpr
 	}
 
 	// Create job
-	// Use remote URL for jobs - remote workers need it to fetch
+	// Use git daemon URL for remote workers (faster, local network)
+	// Fall back to remote URL if git daemon not configured
 	// The embedded worker will substitute local path via dispatcher
+	repoURL := s.repoURL
+	if s.config.GitDaemonURL != "" {
+		repoURL = s.config.GitDaemonURL
+	}
+
 	jobID := fmt.Sprintf("mcp-%s", randomJobSuffix())
 	job := &buildprotocol.JobMessage{
 		JobID:   jobID,
-		Repo:    s.repoURL,
+		Repo:    repoURL,
 		Commit:  s.commit,
 		Command: command,
 		Timeout: timeout,

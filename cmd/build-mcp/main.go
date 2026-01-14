@@ -16,12 +16,17 @@ import (
 )
 
 var coordinatorURL = "http://localhost:8081"
+var gitDaemonURL = "" // Constructed from coordinator URL
 
 func main() {
 	// Check for coordinator URL override
 	if url := os.Getenv("BUILD_POOL_URL"); url != "" {
 		coordinatorURL = url
 	}
+
+	// Construct git daemon URL from coordinator URL
+	// e.g., "http://host:8081" -> "git://host:9418/"
+	gitDaemonURL = constructGitDaemonURL(coordinatorURL)
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -373,13 +378,66 @@ func getGitInfo() (string, string) {
 		commit = strings.TrimSpace(string(out))
 	}
 
-	// Get remote URL
-	cmd = exec.Command("git", "remote", "get-url", "origin")
-	if out, err := cmd.Output(); err == nil {
-		repo = strings.TrimSpace(string(out))
+	// Use git daemon URL if available (for remote workers)
+	// Fall back to remote URL if git daemon URL not constructed
+	if gitDaemonURL != "" {
+		repo = gitDaemonURL
+	} else {
+		// Get remote URL
+		cmd = exec.Command("git", "remote", "get-url", "origin")
+		if out, err := cmd.Output(); err == nil {
+			repo = strings.TrimSpace(string(out))
+		}
 	}
 
 	return repo, commit
+}
+
+// constructGitDaemonURL extracts hostname from coordinator URL and constructs git daemon URL
+// e.g., "http://host:8081" -> "git://host:9418/"
+// For localhost, substitutes with external host (Tailscale IP or hostname)
+func constructGitDaemonURL(coordURL string) string {
+	hostPart := strings.TrimPrefix(coordURL, "http://")
+	hostPart = strings.TrimPrefix(hostPart, "https://")
+
+	// Remove port if present
+	if idx := strings.Index(hostPart, ":"); idx != -1 {
+		hostPart = hostPart[:idx]
+	}
+	// Remove path if present
+	if idx := strings.Index(hostPart, "/"); idx != -1 {
+		hostPart = hostPart[:idx]
+	}
+
+	if hostPart == "" {
+		return ""
+	}
+
+	// If localhost, get external host for remote worker accessibility
+	if hostPart == "localhost" || hostPart == "127.0.0.1" {
+		hostPart = getExternalHost()
+	}
+
+	return fmt.Sprintf("git://%s:9418/", hostPart)
+}
+
+// getExternalHost tries to get a network-accessible address for this machine
+// Prefers Tailscale IP, falls back to hostname
+func getExternalHost() string {
+	// Try Tailscale IP first (most reliable for remote access)
+	if out, err := exec.Command("tailscale", "ip", "-4").Output(); err == nil {
+		if ip := strings.TrimSpace(string(out)); ip != "" {
+			return ip
+		}
+	}
+
+	// Try hostname
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		return hostname
+	}
+
+	// Last resort - return localhost (will likely fail for remote workers)
+	return "localhost"
 }
 
 // httpClient with reasonable timeout
