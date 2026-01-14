@@ -94,6 +94,7 @@ type WorkerTestMsg struct {
 
 // AgentTestMsg reports the result of an agent-based MCP tools test
 type AgentTestMsg struct {
+	TaskID  string
 	Success bool
 	Output  string
 	Error   string
@@ -420,14 +421,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "A":
 			// Run agent test (Dashboard tab) - spawns Claude to test MCP tools
 			if m.activeTab == 0 {
+				// Generate unique task ID for the test agent
+				taskID := fmt.Sprintf("mcp-test-%d", time.Now().UnixNano())
+
+				// Add agent to view immediately
+				m.agents = append(m.agents, &AgentView{
+					TaskID: taskID,
+					Title:  "MCP Tools Test",
+					Status: executor.AgentRunning,
+				})
+				m.activeCount++
+
 				if m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
 					// Use external coordinator
 					m.statusMsg = "Starting agent test via coordinator..."
-					return m, runAgentTestCmd(m.buildPoolURL, m.projectRoot)
+					return m, runAgentTestCmd(taskID, m.buildPoolURL, m.projectRoot)
 				} else {
 					// Start temporary coordinator with embedded worker
 					m.statusMsg = "Starting agent test with embedded worker..."
-					return m, runAgentTestWithEmbeddedCmd(m.projectRoot)
+					return m, runAgentTestWithEmbeddedCmd(taskID, m.projectRoot)
 				}
 			}
 		case "M":
@@ -618,18 +630,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case AgentTestMsg:
-		if msg.Success {
-			m.statusMsg = "Agent test PASSED"
-			// Store output for display (truncate for status bar)
-			output := strings.TrimSpace(msg.Output)
-			if len(output) > 200 {
-				output = output[:200] + "..."
-			}
-			m.testOutput = output
-		} else {
-			m.statusMsg = fmt.Sprintf("Agent test: %s", msg.Error)
-			if msg.Output != "" {
-				m.testOutput = msg.Output
+		// Update the test agent in the agents list
+		for i, a := range m.agents {
+			if a.TaskID == msg.TaskID {
+				if msg.Success {
+					m.agents[i].Status = executor.AgentCompleted
+					m.statusMsg = "Agent test PASSED"
+				} else {
+					m.agents[i].Status = executor.AgentFailed
+					m.agents[i].Error = msg.Error
+					m.statusMsg = fmt.Sprintf("Agent test: %s", msg.Error)
+				}
+				// Store full output in the agent view
+				if msg.Output != "" {
+					lines := strings.Split(msg.Output, "\n")
+					m.agents[i].Output = lines
+				}
+				m.activeCount--
+				if m.activeCount < 0 {
+					m.activeCount = 0
+				}
+				break
 			}
 		}
 		return m, nil
@@ -1377,7 +1398,7 @@ func applyResolutionsCmd(syncer *isync.Syncer, store *taskstore.Store, resolutio
 }
 
 // runAgentTestCmd spawns a Claude agent to test the build pool MCP tools via external coordinator
-func runAgentTestCmd(buildPoolURL, projectRoot string) tea.Cmd {
+func runAgentTestCmd(taskID, buildPoolURL, projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -1391,12 +1412,14 @@ func runAgentTestCmd(buildPoolURL, projectRoot string) tea.Cmd {
 		result, err := buildpool.RunTestAgent(ctx, config, nil)
 		if err != nil {
 			return AgentTestMsg{
+				TaskID:  taskID,
 				Success: false,
 				Error:   err.Error(),
 			}
 		}
 
 		return AgentTestMsg{
+			TaskID:  taskID,
 			Success: result.Success,
 			Output:  result.Output,
 			Error:   result.Error,
@@ -1405,7 +1428,7 @@ func runAgentTestCmd(buildPoolURL, projectRoot string) tea.Cmd {
 }
 
 // runAgentTestWithEmbeddedCmd spawns a Claude agent with a temporary embedded coordinator
-func runAgentTestWithEmbeddedCmd(projectRoot string) tea.Cmd {
+func runAgentTestWithEmbeddedCmd(taskID, projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -1413,12 +1436,14 @@ func runAgentTestWithEmbeddedCmd(projectRoot string) tea.Cmd {
 		result, err := buildpool.RunTestAgentWithEmbeddedCoordinator(ctx, projectRoot, false, nil)
 		if err != nil {
 			return AgentTestMsg{
+				TaskID:  taskID,
 				Success: false,
 				Error:   err.Error(),
 			}
 		}
 
 		return AgentTestMsg{
+			TaskID:  taskID,
 			Success: result.Success,
 			Output:  result.Output,
 			Error:   result.Error,
