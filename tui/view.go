@@ -234,20 +234,33 @@ func (m Model) View() string {
 			modalHeight := len(modalLines)
 			contentHeight := len(contentLines)
 
+			// Ensure we have enough lines to fit the modal
+			minRequiredHeight := modalHeight + 4 // 2 lines top padding + modal + 2 lines bottom
+			if contentHeight < minRequiredHeight {
+				// Pad content with empty lines
+				for i := contentHeight; i < minRequiredHeight; i++ {
+					contentLines = append(contentLines, strings.Repeat(" ", m.width))
+				}
+				contentHeight = len(contentLines)
+			}
+
 			// Calculate vertical position (roughly centered)
 			topPadding := (contentHeight - modalHeight) / 2
 			if topPadding < 2 {
 				topPadding = 2
 			}
 
+			// Pre-split centered modal for efficiency
+			centeredModalLines := strings.Split(centeredModal.String(), "\n")
+
 			// Rebuild content with modal overlay
 			var result strings.Builder
 			for i, line := range contentLines {
 				if i >= topPadding && i < topPadding+modalHeight {
 					modalLineIdx := i - topPadding
-					if modalLineIdx < len(modalLines) {
+					if modalLineIdx < len(centeredModalLines) {
 						// Use modal line (already centered)
-						result.WriteString(strings.TrimRight(strings.Split(centeredModal.String(), "\n")[modalLineIdx], " "))
+						result.WriteString(strings.TrimRight(centeredModalLines[modalLineIdx], " "))
 					} else {
 						result.WriteString(line)
 					}
