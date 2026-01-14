@@ -284,7 +284,7 @@ func RunTestAgentWithEmbeddedCoordinator(ctx context.Context, projectRoot string
 		RepoDir:     projectRoot,
 		WorktreeDir: worktreeDir,
 		MaxJobs:     2,
-		UseNixShell: false, // Don't require nix for tests
+		UseNixShell: true, // Use nix develop for access to cargo and other tools
 	})
 
 	// Create dispatcher with embedded worker
