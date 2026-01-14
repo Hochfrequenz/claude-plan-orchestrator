@@ -90,9 +90,19 @@ func ParseModuleDir(dir string) ([]*domain.Task, error) {
 		tasks = append(tasks, task)
 	}
 
-	// Add implicit dependencies
+	// Build set of existing task IDs
+	existingTasks := make(map[string]bool)
+	for _, task := range tasks {
+		existingTasks[task.ID.String()] = true
+	}
+
+	// Add implicit dependencies (only if target task exists)
 	for _, task := range tasks {
 		if dep := task.ImplicitDependency(); dep != nil {
+			// Only add if the dependency actually exists
+			if !existingTasks[dep.String()] {
+				continue
+			}
 			// Check if already in explicit deps
 			found := false
 			for _, d := range task.DependsOn {

@@ -80,6 +80,64 @@ func TestParseModuleDir(t *testing.T) {
 	}
 }
 
+func TestParseModuleDir_MissingPredecessor(t *testing.T) {
+	// Test that implicit dependencies are NOT added when predecessor doesn't exist
+	dir := t.TempDir()
+	moduleDir := filepath.Join(dir, "pm-tool-module")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Create E01 without E00 - simulates the user's scenario
+	os.WriteFile(filepath.Join(moduleDir, "epic-01-foundation.md"), []byte("# Epic 01: Foundation\n\nSetup foundation."), 0644)
+	os.WriteFile(filepath.Join(moduleDir, "epic-02-domain.md"), []byte("# Epic 02: Domain\n\nCore domain."), 0644)
+
+	tasks, err := ParseModuleDir(moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(tasks) != 2 {
+		t.Fatalf("Task count = %d, want 2", len(tasks))
+	}
+
+	// Find E01
+	var e01 *domain.Task
+	for _, task := range tasks {
+		if task.ID.EpicNum == 1 {
+			e01 = task
+			break
+		}
+	}
+
+	if e01 == nil {
+		t.Fatal("E01 not found")
+	}
+
+	// E01 should have NO dependencies since E00 doesn't exist
+	if len(e01.DependsOn) != 0 {
+		t.Errorf("E01 should have no dependencies (E00 doesn't exist), got %v", e01.DependsOn)
+	}
+
+	// Find E02
+	var e02 *domain.Task
+	for _, task := range tasks {
+		if task.ID.EpicNum == 2 {
+			e02 = task
+			break
+		}
+	}
+
+	if e02 == nil {
+		t.Fatal("E02 not found")
+	}
+
+	// E02 SHOULD depend on E01 since E01 exists
+	if len(e02.DependsOn) != 1 {
+		t.Errorf("E02 should have 1 dependency (E01), got %d", len(e02.DependsOn))
+	} else if e02.DependsOn[0].EpicNum != 1 {
+		t.Errorf("E02 should depend on E01, got %v", e02.DependsOn[0])
+	}
+}
+
 func TestExtractTaskIDFromPath(t *testing.T) {
 	tests := []struct {
 		path       string
