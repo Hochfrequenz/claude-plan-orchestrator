@@ -194,13 +194,33 @@ func (s *Syncer) UpdateEpicFrontmatter(epicPath string, status domain.TaskStatus
 
 // GitPull pulls the latest changes from the remote
 // Uses mutex to prevent concurrent git operations
+// Deprecated: Use SyncTaskStatus for atomic sync operations
 func (s *Syncer) GitPull() error {
 	s.gitMu.Lock()
 	defer s.gitMu.Unlock()
 
-	cmd := exec.Command("git", "pull", "--rebase")
+	return s.gitPullLocked()
+}
+
+func (s *Syncer) gitPullLocked() error {
+	// Stash any local changes first to avoid rebase conflicts
+	cmd := exec.Command("git", "stash", "--include-untracked")
+	cmd.Dir = s.projectRoot
+	stashOutput, _ := cmd.CombinedOutput()
+	hasStash := !strings.Contains(string(stashOutput), "No local changes")
+
+	// Pull with rebase
+	cmd = exec.Command("git", "pull", "--rebase")
 	cmd.Dir = s.projectRoot
 	output, err := cmd.CombinedOutput()
+
+	// Pop stash if we stashed something
+	if hasStash {
+		popCmd := exec.Command("git", "stash", "pop")
+		popCmd.Dir = s.projectRoot
+		popCmd.CombinedOutput() // Ignore errors - stash might conflict
+	}
+
 	if err != nil {
 		return fmt.Errorf("git pull failed: %w\n%s", err, output)
 	}
@@ -209,10 +229,15 @@ func (s *Syncer) GitPull() error {
 
 // GitCommitAndPush commits and pushes the README and epic status changes
 // Uses mutex to prevent concurrent git operations
+// Deprecated: Use SyncTaskStatus for atomic sync operations
 func (s *Syncer) GitCommitAndPush(taskID domain.TaskID, status domain.TaskStatus, epicFilePath string) error {
 	s.gitMu.Lock()
 	defer s.gitMu.Unlock()
 
+	return s.gitCommitAndPushLocked(taskID, status, epicFilePath)
+}
+
+func (s *Syncer) gitCommitAndPushLocked(taskID domain.TaskID, status domain.TaskStatus, epicFilePath string) error {
 	root := s.projectRoot
 
 	// Stage README.md at project root
@@ -259,12 +284,48 @@ func (s *Syncer) GitCommitAndPush(taskID domain.TaskID, status domain.TaskStatus
 		return fmt.Errorf("git commit failed: %w\n%s", err, output)
 	}
 
-	// Push
-	cmd = exec.Command("git", "push")
-	cmd.Dir = root
-	if output, err := cmd.CombinedOutput(); err != nil {
+	// Push (with retry on rejection)
+	for i := 0; i < 3; i++ {
+		cmd = exec.Command("git", "push")
+		cmd.Dir = root
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		// If push was rejected, pull and retry
+		if strings.Contains(string(output), "rejected") || strings.Contains(string(output), "non-fast-forward") {
+			s.gitPullLocked()
+			continue
+		}
 		return fmt.Errorf("git push failed: %w\n%s", err, output)
 	}
+	return fmt.Errorf("git push failed after 3 retries")
+}
 
-	return nil
+// SyncTaskStatus atomically syncs task status: pull, update files, commit, push
+// This holds the mutex for the entire operation to prevent race conditions
+func (s *Syncer) SyncTaskStatus(taskID domain.TaskID, status domain.TaskStatus, epicFilePath string) error {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+
+	// 1. Pull latest changes (with stash to handle any uncommitted changes)
+	if err := s.gitPullLocked(); err != nil {
+		// Log but continue - we'll try to commit our changes anyway
+		fmt.Printf("Warning: git pull failed: %v\n", err)
+	}
+
+	// 2. Update epic frontmatter
+	if epicFilePath != "" {
+		if err := s.UpdateEpicFrontmatter(epicFilePath, status); err != nil {
+			fmt.Printf("Warning: failed to update epic frontmatter: %v\n", err)
+		}
+	}
+
+	// 3. Update README status
+	if err := s.UpdateTaskStatus(taskID, status); err != nil {
+		fmt.Printf("Warning: failed to update README status: %v\n", err)
+	}
+
+	// 4. Commit and push
+	return s.gitCommitAndPushLocked(taskID, status, epicFilePath)
 }

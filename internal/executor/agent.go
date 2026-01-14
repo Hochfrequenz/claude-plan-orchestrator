@@ -1016,7 +1016,7 @@ func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 			}
 		}
 
-		// Sync epic and README status
+		// Sync epic and README status (atomic operation)
 		if m.syncer != nil && agent.EpicFilePath != "" {
 			var taskStatus domain.TaskStatus
 			switch newStatus {
@@ -1029,25 +1029,9 @@ func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 				return
 			}
 
-			// Pull latest changes first to avoid conflicts
-			if err := m.syncer.GitPull(); err != nil {
-				fmt.Printf("Warning: git pull failed for %s: %v\n", agent.TaskID.String(), err)
-				// Continue anyway - local update is still useful
-			}
-
-			// Update epic frontmatter
-			if err := m.syncer.UpdateEpicFrontmatter(agent.EpicFilePath, taskStatus); err != nil {
-				fmt.Printf("Warning: failed to update epic frontmatter for %s: %v\n", agent.TaskID.String(), err)
-			}
-
-			// Update README status emoji
-			if err := m.syncer.UpdateTaskStatus(agent.TaskID, taskStatus); err != nil {
-				fmt.Printf("Warning: failed to update README status for %s: %v\n", agent.TaskID.String(), err)
-			}
-
-			// Commit and push the changes (including epic file)
-			if err := m.syncer.GitCommitAndPush(agent.TaskID, taskStatus, agent.EpicFilePath); err != nil {
-				fmt.Printf("Warning: git commit/push failed for %s: %v\n", agent.TaskID.String(), err)
+			// Atomically: pull, update files, commit, push
+			if err := m.syncer.SyncTaskStatus(agent.TaskID, taskStatus, agent.EpicFilePath); err != nil {
+				fmt.Printf("Warning: sync failed for %s: %v\n", agent.TaskID.String(), err)
 			}
 		}
 	}
