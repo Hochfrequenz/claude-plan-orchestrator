@@ -172,3 +172,126 @@ func TestDispatcher_Cancel(t *testing.T) {
 		t.Errorf("cancelledJobs = %v, want [job-1]", cancelledJobs)
 	}
 }
+
+func TestDispatcher_VerbosityFilterPreservesErrorMessages(t *testing.T) {
+	// Test that verbosity filtering preserves error messages
+	tests := []struct {
+		name      string
+		verbosity string
+		input     *buildprotocol.JobResult
+		wantError bool // should Output contain error message?
+	}{
+		{
+			name:      "minimal_with_stderr_error",
+			verbosity: buildprotocol.VerbosityMinimal,
+			input: &buildprotocol.JobResult{
+				JobID:    "test-1",
+				ExitCode: -1,
+				Stderr:   "embedded worker error: something went wrong",
+				Output:   "embedded worker error: something went wrong",
+			},
+			wantError: true, // Should preserve error message
+		},
+		{
+			name:      "minimal_with_output_only",
+			verbosity: buildprotocol.VerbosityMinimal,
+			input: &buildprotocol.JobResult{
+				JobID:    "test-2",
+				ExitCode: -1,
+				Output:   "embedded worker error: something went wrong",
+				// Stderr not set - tests fallback
+			},
+			wantError: true, // Should use Output fallback
+		},
+		{
+			name:      "normal_with_error",
+			verbosity: buildprotocol.VerbosityNormal,
+			input: &buildprotocol.JobResult{
+				JobID:    "test-3",
+				ExitCode: -1,
+				Stderr:   "error message",
+				Stdout:   "some stdout output\nmore lines\n",
+				Output:   "some stdout output\nmore lines\nerror message",
+			},
+			wantError: true,
+		},
+		{
+			name:      "full_with_error",
+			verbosity: buildprotocol.VerbosityFull,
+			input: &buildprotocol.JobResult{
+				JobID:    "test-4",
+				ExitCode: -1,
+				Stderr:   "error message",
+				Stdout:   "stdout output",
+				Output:   "stdout outputerror message",
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := applyVerbosityFilter(tt.input, tt.verbosity)
+
+			t.Logf("Input:  Output=%q, Stderr=%q", tt.input.Output, tt.input.Stderr)
+			t.Logf("Result: Output=%q, Stderr=%q", filtered.Output, filtered.Stderr)
+
+			if tt.wantError {
+				// Error message should be preserved in Output
+				if filtered.Output == "" {
+					t.Errorf("Output is empty, want error message preserved")
+				}
+			}
+
+			// ExitCode should always be preserved
+			if filtered.ExitCode != tt.input.ExitCode {
+				t.Errorf("ExitCode = %d, want %d", filtered.ExitCode, tt.input.ExitCode)
+			}
+		})
+	}
+}
+
+func TestDispatcher_VerbosityFilterWithEmbeddedWorker(t *testing.T) {
+	// Full integration test: embedded worker error → dispatcher → verbosity filter
+	reg := NewRegistry()
+
+	// Mock embedded worker that returns an error result
+	embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+		return &buildprotocol.JobResult{
+			JobID:    job.JobID,
+			ExitCode: -1,
+			Stderr:   "embedded worker error: test error message",
+			Output:   "embedded worker error: test error message",
+		}
+	}
+
+	disp := NewDispatcher(reg, embedded)
+
+	job := &buildprotocol.JobMessage{
+		JobID:   "test-job",
+		Repo:    "", // Empty repo triggers embedded worker
+		Command: "test",
+	}
+
+	// Submit with minimal verbosity (strictest filtering)
+	resultCh := disp.SubmitWithVerbosity(job, buildprotocol.VerbosityMinimal)
+	disp.TryDispatch()
+
+	// Wait for result
+	result := <-resultCh
+
+	t.Logf("Result: ExitCode=%d, Output=%q, Stderr=%q", result.ExitCode, result.Output, result.Stderr)
+
+	// Should preserve error details
+	if result.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+	}
+
+	if result.Output == "" {
+		t.Errorf("Output is empty, want error message")
+	}
+
+	if result.Stderr == "" {
+		t.Errorf("Stderr is empty, want error message")
+	}
+}

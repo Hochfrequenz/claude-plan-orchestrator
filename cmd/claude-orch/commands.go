@@ -119,7 +119,20 @@ func init() {
 		RunE:  runBuildPoolStop,
 	}
 
-	buildPoolCmd.AddCommand(buildPoolStartCmd, buildPoolStatusCmd, buildPoolStopCmd)
+	buildPoolTestCmd := &cobra.Command{
+		Use:   "test",
+		Short: "Test the build pool by running an agent that calls MCP tools",
+		Long: `Dispatches a Claude agent to test the build pool MCP tools.
+The agent will call worker_status, run_command with various scenarios,
+and report whether each tool works correctly.
+
+Use --quick for a faster HTTP-only test without spawning a Claude agent.`,
+		RunE: runBuildPoolTest,
+	}
+	buildPoolTestCmd.Flags().Bool("quick", false, "Run quick HTTP test without Claude agent")
+	buildPoolTestCmd.Flags().Bool("verbose", false, "Show verbose output")
+
+	buildPoolCmd.AddCommand(buildPoolStartCmd, buildPoolStatusCmd, buildPoolStopCmd, buildPoolTestCmd)
 	rootCmd.AddCommand(buildPoolCmd)
 }
 
@@ -695,5 +708,65 @@ func runBuildPoolStop(cmd *cobra.Command, args []string) error {
 	// TODO: Signal running coordinator to stop
 	fmt.Println("Stopping build pool...")
 	fmt.Println("  (graceful stop not yet implemented)")
+	return nil
+}
+
+func runBuildPoolTest(cmd *cobra.Command, args []string) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	if !cfg.BuildPool.Enabled {
+		fmt.Println("Build pool is not enabled in config. Set build_pool.enabled = true")
+		return nil
+	}
+
+	quick, _ := cmd.Flags().GetBool("quick")
+	verbose, _ := cmd.Flags().GetBool("verbose")
+
+	buildPoolURL := fmt.Sprintf("http://localhost:%d", cfg.BuildPool.WebSocketPort)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if quick {
+		fmt.Println("Running quick HTTP test...")
+		result, err := buildpool.QuickTest(ctx, buildPoolURL)
+		if err != nil {
+			return err
+		}
+		fmt.Println(result.Output)
+		if result.Success {
+			fmt.Println("\n✓ Quick test passed")
+		} else {
+			fmt.Printf("\n✗ Quick test failed: %s\n", result.Error)
+		}
+		return nil
+	}
+
+	fmt.Println("Running build pool agent test...")
+	fmt.Println("This will spawn a Claude agent to test all MCP tools.\n")
+
+	result, err := buildpool.RunTestAgent(ctx, buildpool.TestAgentConfig{
+		BuildPoolURL: buildPoolURL,
+		ProjectRoot:  cfg.General.ProjectRoot,
+		Verbose:      verbose,
+	}, func(line string) {
+		// Print each line of output as it comes
+		fmt.Print(line)
+	})
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println() // Newline after streaming output
+	if result.Success {
+		fmt.Println("\n✓ Agent test completed successfully")
+	} else {
+		fmt.Printf("\n✗ Agent test failed: %s\n", result.Error)
+	}
+
 	return nil
 }

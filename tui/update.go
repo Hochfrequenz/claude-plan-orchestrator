@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildpool"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildprotocol"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/mcp"
@@ -84,6 +87,13 @@ type WorkersUpdateMsg struct {
 
 // WorkerTestMsg reports the result of a worker test
 type WorkerTestMsg struct {
+	Success bool
+	Output  string
+	Error   string
+}
+
+// AgentTestMsg reports the result of an agent-based MCP tools test
+type AgentTestMsg struct {
 	Success bool
 	Output  string
 	Error   string
@@ -394,6 +404,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.buildPoolStatus != "connected" {
 				m.statusMsg = "Build pool not connected"
 			}
+		case "E":
+			// Test worker error handling (Dashboard tab)
+			if m.activeTab == 0 {
+				if m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
+					// Test via coordinator (may use remote workers or embedded fallback)
+					m.statusMsg = "Testing error handling via coordinator..."
+					return m, testWorkerErrorCmd(m.buildPoolURL, m.projectRoot)
+				} else {
+					// Test embedded worker directly (no coordinator running)
+					m.statusMsg = "Testing embedded worker directly..."
+					return m, testEmbeddedWorkerDirectCmd(m.projectRoot)
+				}
+			}
+		case "A":
+			// Run agent test (Dashboard tab) - spawns Claude to test MCP tools
+			if m.activeTab == 0 && m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
+				m.statusMsg = "Starting agent test (this may take a minute)..."
+				return m, runAgentTestCmd(m.buildPoolURL, m.projectRoot)
+			} else if m.buildPoolStatus != "connected" {
+				m.statusMsg = "Build pool not connected - start coordinator first"
+			}
 		case "M":
 			// Toggle mouse mode (allows text selection when disabled)
 			m.mouseEnabled = !m.mouseEnabled
@@ -578,6 +609,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Worker test OK: %s", strings.TrimSpace(msg.Output))
 		} else {
 			m.statusMsg = fmt.Sprintf("Worker test failed: %s", msg.Error)
+		}
+		return m, nil
+
+	case AgentTestMsg:
+		if msg.Success {
+			m.statusMsg = "Agent test PASSED"
+			// Store output for display (truncate for status bar)
+			output := strings.TrimSpace(msg.Output)
+			if len(output) > 200 {
+				output = output[:200] + "..."
+			}
+			m.testOutput = output
+		} else {
+			m.statusMsg = fmt.Sprintf("Agent test: %s", msg.Error)
+			if msg.Output != "" {
+				m.testOutput = msg.Output
+			}
 		}
 		return m, nil
 
@@ -1180,6 +1228,130 @@ func getExternalHost() string {
 	return "localhost"
 }
 
+// testWorkerErrorCmd sends test commands to verify error handling
+// It sends three test commands:
+// 1. A command that exits with code 42 (should show "exit code 42")
+// 2. A command that writes to stderr (should show stderr output)
+// 3. A nonexistent command (should trigger executor error with exit code -1)
+func testWorkerErrorCmd(buildPoolURL, projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		client := &http.Client{Timeout: 60 * time.Second}
+
+		// Test 1: Command that exits with specific code and stderr
+		tests := []struct {
+			name    string
+			command string
+		}{
+			{"exit_42", "echo 'stdout line' && echo 'error: test failure' >&2 && exit 42"},
+			{"stderr_only", "echo 'error message on stderr' >&2 && exit 1"},
+			{"bad_command", "/nonexistent_command_that_does_not_exist_12345"},
+		}
+
+		var results []string
+		for _, test := range tests {
+			jobReq := struct {
+				Command string `json:"command"`
+				Repo    string `json:"repo"`
+				Commit  string `json:"commit"`
+				Timeout int    `json:"timeout"`
+			}{
+				Command: test.command,
+				Repo:    "", // Empty repo triggers local execution without git
+				Commit:  "",
+				Timeout: 30,
+			}
+
+			reqBody, _ := json.Marshal(jobReq)
+			resp, err := client.Post(buildPoolURL+"/job", "application/json", strings.NewReader(string(reqBody)))
+			if err != nil {
+				results = append(results, fmt.Sprintf("%s: HTTP error: %s", test.name, err.Error()))
+				continue
+			}
+
+			var jobResp struct {
+				JobID    string `json:"job_id"`
+				ExitCode int    `json:"exit_code"`
+				Output   string `json:"output"`
+				Error    string `json:"error"`
+			}
+
+			if err := json.NewDecoder(resp.Body).Decode(&jobResp); err != nil {
+				resp.Body.Close()
+				results = append(results, fmt.Sprintf("%s: decode error: %s", test.name, err.Error()))
+				continue
+			}
+			resp.Body.Close()
+
+			// Truncate output for display
+			output := strings.TrimSpace(jobResp.Output)
+			if len(output) > 100 {
+				output = output[:100] + "..."
+			}
+			results = append(results, fmt.Sprintf("%s: exit=%d, output=%q", test.name, jobResp.ExitCode, output))
+		}
+
+		return WorkerTestMsg{Success: false, Error: strings.Join(results, " | ")}
+	}
+}
+
+// testEmbeddedWorkerDirectCmd tests the embedded worker directly without coordinator
+// This bypasses HTTP/coordinator to isolate embedded worker behavior
+func testEmbeddedWorkerDirectCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		// Create a temporary worktree directory for the embedded worker
+		tempDir, err := os.MkdirTemp("", "embedded-test-")
+		if err != nil {
+			return WorkerTestMsg{Success: false, Error: fmt.Sprintf("failed to create temp dir: %v", err)}
+		}
+		defer os.RemoveAll(tempDir)
+
+		// Create embedded worker
+		worker := buildpool.NewEmbeddedWorker(buildpool.EmbeddedConfig{
+			RepoDir:     filepath.Join(tempDir, "repos"),
+			WorktreeDir: filepath.Join(tempDir, "worktrees"),
+			MaxJobs:     1,
+			UseNixShell: false, // Direct shell for faster test
+		})
+
+		tests := []struct {
+			name    string
+			command string
+		}{
+			{"exit_42", "echo 'stdout line' && echo 'error: test failure' >&2 && exit 42"},
+			{"stderr_only", "echo 'error message on stderr' >&2 && exit 1"},
+			{"bad_command", "/nonexistent_command_that_does_not_exist_12345"},
+		}
+
+		var results []string
+		for i, test := range tests {
+			job := &buildprotocol.JobMessage{
+				JobID:   fmt.Sprintf("test-%d", i),
+				Repo:    "", // Empty repo - no git checkout needed
+				Commit:  "",
+				Command: test.command,
+				Timeout: 30,
+			}
+
+			result := worker.Run(job)
+
+			// Format result - show all fields to diagnose issue
+			output := result.Output
+			if len(output) > 80 {
+				output = output[:80] + "..."
+			}
+			stderr := result.Stderr
+			if len(stderr) > 80 {
+				stderr = stderr[:80] + "..."
+			}
+
+			results = append(results, fmt.Sprintf("%s: exit=%d, output=%q, stderr=%q",
+				test.name, result.ExitCode, output, stderr))
+		}
+
+		return WorkerTestMsg{Success: false, Error: strings.Join(results, " | ")}
+	}
+}
+
 // startSyncCmd initiates a two-way sync
 func startSyncCmd(syncer *isync.Syncer, store *taskstore.Store) tea.Cmd {
 	return func() tea.Msg {
@@ -1196,6 +1368,34 @@ func applyResolutionsCmd(syncer *isync.Syncer, store *taskstore.Store, resolutio
 		}
 		err := syncer.ResolveConflicts(store, resolutions)
 		return SyncResolveMsg{Err: err}
+	}
+}
+
+// runAgentTestCmd spawns a Claude agent to test the build pool MCP tools
+func runAgentTestCmd(buildPoolURL, projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		config := buildpool.TestAgentConfig{
+			BuildPoolURL: buildPoolURL,
+			ProjectRoot:  projectRoot,
+			Verbose:      false,
+		}
+
+		result, err := buildpool.RunTestAgent(ctx, config, nil)
+		if err != nil {
+			return AgentTestMsg{
+				Success: false,
+				Error:   err.Error(),
+			}
+		}
+
+		return AgentTestMsg{
+			Success: result.Success,
+			Output:  result.Output,
+			Error:   result.Error,
+		}
 	}
 }
 

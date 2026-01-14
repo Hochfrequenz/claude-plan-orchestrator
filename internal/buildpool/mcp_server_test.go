@@ -907,6 +907,102 @@ func TestMCPServer_LocalWorkerWithUnpushedCommits(t *testing.T) {
 	}
 }
 
+func TestMCPServer_ErrorOutputFormatting(t *testing.T) {
+	// Test that MCP server properly formats error messages for non-zero exit codes
+	// This verifies the "[Exit code: N]" prefix and "(no output captured)" fallback
+
+	registry := NewRegistry()
+
+	tests := []struct {
+		name       string
+		exitCode   int
+		output     string
+		stderr     string
+		wantPrefix string
+		wantMsg    string
+	}{
+		{
+			name:       "exit_42_with_output",
+			exitCode:   42,
+			output:     "error: something went wrong",
+			stderr:     "error: something went wrong",
+			wantPrefix: "[Exit code: 42]",
+			wantMsg:    "error: something went wrong",
+		},
+		{
+			name:       "exit_minus1_with_error",
+			exitCode:   -1,
+			output:     "embedded worker error: git fetch failed",
+			stderr:     "embedded worker error: git fetch failed",
+			wantPrefix: "[Exit code: -1]",
+			wantMsg:    "embedded worker error: git fetch failed",
+		},
+		{
+			name:       "exit_1_no_output",
+			exitCode:   1,
+			output:     "",
+			stderr:     "",
+			wantPrefix: "[Exit code: 1]",
+			wantMsg:    "(no output captured)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create embedded worker that returns the test result
+			embedded := func(job *buildprotocol.JobMessage) *buildprotocol.JobResult {
+				return &buildprotocol.JobResult{
+					JobID:    job.JobID,
+					ExitCode: tt.exitCode,
+					Output:   tt.output,
+					Stdout:   "",
+					Stderr:   tt.stderr,
+				}
+			}
+
+			dispatcher := NewDispatcher(registry, embedded)
+			server := NewMCPServer(MCPServerConfig{WorktreePath: "."}, dispatcher, registry)
+
+			// Test via handleRequest to get the formatted output
+			req := map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      float64(1),
+				"method":  "tools/call",
+				"params": map[string]interface{}{
+					"name": "run_command",
+					"arguments": map[string]interface{}{
+						"command": "test",
+					},
+				},
+			}
+
+			resp := server.handleRequest(req)
+
+			result, ok := resp["result"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected result map, got error: %v", resp["error"])
+			}
+
+			content, ok := result["content"].([]map[string]interface{})
+			if !ok || len(content) == 0 {
+				t.Fatal("expected content array")
+			}
+
+			text := content[0]["text"].(string)
+
+			t.Logf("Response text: %q", text)
+
+			if !strings.Contains(text, tt.wantPrefix) {
+				t.Errorf("output should contain %q, got: %s", tt.wantPrefix, text)
+			}
+
+			if !strings.Contains(text, tt.wantMsg) {
+				t.Errorf("output should contain %q, got: %s", tt.wantMsg, text)
+			}
+		})
+	}
+}
+
 func TestMCPServer_LocalWorkerFromWorktree(t *testing.T) {
 	// This test verifies the local embedded worker can work when MCPServer
 	// is pointed at a git worktree (not the main repo).
