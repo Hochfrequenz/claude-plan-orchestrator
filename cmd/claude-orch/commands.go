@@ -479,6 +479,8 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		RecoveredAgents: recoveredViews,
 		PlanWatcher:     planWatcher,
 		PlanChangeChan:  planChangeChan,
+		Store:           store,
+		Syncer:          syncer,
 	})
 
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
