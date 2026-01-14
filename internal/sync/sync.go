@@ -415,6 +415,38 @@ func (s *Syncer) SyncMarkdownToDB(store *taskstore.Store) (int, error) {
 	return len(tasks), nil
 }
 
+// SyncDBToMarkdown updates all markdown files to match database statuses.
+// Returns the number of tasks synced.
+func (s *Syncer) SyncDBToMarkdown(store *taskstore.Store) (int, error) {
+	tasks, err := store.ListTasks(taskstore.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("listing tasks: %w", err)
+	}
+
+	count := 0
+	for _, task := range tasks {
+		if task.FilePath == "" {
+			continue
+		}
+
+		// Update frontmatter
+		if err := s.UpdateEpicFrontmatter(task.FilePath, task.Status); err != nil {
+			// Log but continue - file may not exist
+			continue
+		}
+
+		// Update README
+		if err := s.UpdateTaskStatus(task.ID, task.Status); err != nil {
+			// Log but continue
+			continue
+		}
+
+		count++
+	}
+
+	return count, nil
+}
+
 // TwoWaySync performs a two-way sync between markdown files and the database.
 // Returns conflicts that need manual resolution.
 func (s *Syncer) TwoWaySync(store *taskstore.Store) (*SyncResult, error) {

@@ -448,3 +448,58 @@ func TestSyncMarkdownToDB(t *testing.T) {
 		t.Error("E02 should be in_progress in DB")
 	}
 }
+
+func TestSyncDBToMarkdown(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Create epic file with not_started
+	epicPath := filepath.Join(moduleDir, "epic-01-setup.md")
+	os.WriteFile(epicPath, []byte("---\nstatus: not_started\n---\n\n# E01: Setup\n"), 0644)
+
+	// Create README
+	readmePath := filepath.Join(root, "README.md")
+	readme := `# Project
+
+### Technical Module
+
+| Epic | Description | Status |
+|------|-------------|:------:|
+| [E01](docs/plans/technical/epic-01-setup.md) | Setup | 🔴 |
+`
+	os.WriteFile(readmePath, []byte(readme), 0644)
+
+	// DB has it as complete
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 1},
+		Title:    "Setup",
+		Status:   domain.StatusComplete,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+	count, err := syncer.SyncDBToMarkdown(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 1 {
+		t.Errorf("expected 1 task synced, got %d", count)
+	}
+
+	// Verify epic frontmatter updated
+	updated, _ := os.ReadFile(epicPath)
+	if !strings.Contains(string(updated), "status: complete") {
+		t.Errorf("epic should have status: complete, got:\n%s", string(updated))
+	}
+
+	// Verify README updated
+	updatedReadme, _ := os.ReadFile(readmePath)
+	if !strings.Contains(string(updatedReadme), "🟢") {
+		t.Errorf("README should have 🟢, got:\n%s", string(updatedReadme))
+	}
+}
