@@ -88,6 +88,7 @@ type Model struct {
 	// Batch execution state
 	batchRunning bool
 	batchPaused  bool
+	autoMode     bool // Auto mode: continuously start new tasks when slots available
 	statusMsg    string
 
 	// Build pool

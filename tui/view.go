@@ -134,15 +134,25 @@ func (m Model) View() string {
 	// Status message (if any)
 	if m.statusMsg != "" {
 		statusLine := fmt.Sprintf(" %s ", m.statusMsg)
+		if m.autoMode {
+			// Auto mode indicator
+			statusLine = fmt.Sprintf(" 🔄 AUTO | %s ", m.statusMsg)
+		}
 		if m.batchRunning {
 			if m.batchPaused {
 				b.WriteString(warningStyle.Width(m.width).Render("⏸ " + statusLine))
 			} else {
 				b.WriteString(runningStyle.Width(m.width).Render("▶ " + statusLine))
 			}
+		} else if m.autoMode {
+			b.WriteString(runningStyle.Width(m.width).Render(statusLine))
 		} else {
 			b.WriteString(queuedStyle.Width(m.width).Render(statusLine))
 		}
+		b.WriteString("\n")
+	} else if m.autoMode {
+		// Show auto mode even without status message
+		b.WriteString(runningStyle.Width(m.width).Render(" 🔄 AUTO MODE - waiting for tasks... "))
 		b.WriteString("\n")
 	}
 
@@ -187,12 +197,16 @@ func (m Model) View() string {
 		if m.buildPoolStatus == "connected" {
 			testHint = "[T]est worker "
 		}
+		autoHint := "[a]uto"
+		if m.autoMode {
+			autoHint = "[a]uto:ON"
+		}
 		if m.batchRunning && !m.batchPaused {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[p]ause %s [q]uit ", testHint, mouseHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[p]ause %s %s [q]uit ", testHint, autoHint, mouseHint)
 		} else if m.batchRunning && m.batchPaused {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[p]resume %s [q]uit ", testHint, mouseHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[p]resume %s %s [q]uit ", testHint, autoHint, mouseHint)
 		} else {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[s]tart batch %s [q]uit ", testHint, mouseHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[s]tart [a]uto %s [q]uit ", testHint, mouseHint)
 		}
 	}
 	b.WriteString(statusBarStyle.Width(m.width).Render(statusBar))

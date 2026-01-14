@@ -550,6 +550,56 @@ func TestModel_BatchStartOnlyOnDashboard(t *testing.T) {
 	}
 }
 
+func TestModel_AutoModeToggle(t *testing.T) {
+	tasks := []*domain.Task{
+		{ID: domain.TaskID{Module: "test", EpicNum: 0}, Status: domain.StatusNotStarted},
+	}
+
+	model := NewModel(ModelConfig{MaxActive: 3, Queued: tasks})
+	model.width = 100
+	model.height = 40
+	model.activeTab = 0 // Dashboard tab
+
+	// Initially auto mode should be off
+	if model.autoMode {
+		t.Error("autoMode should be false initially")
+	}
+
+	// Press 'a' to enable auto mode
+	newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	model = newModel.(Model)
+
+	if !model.autoMode {
+		t.Error("autoMode should be true after 'a'")
+	}
+
+	// Press 'a' again to disable
+	newModel, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	model = newModel.(Model)
+
+	if model.autoMode {
+		t.Error("autoMode should be false after second 'a'")
+	}
+	if model.statusMsg != "Auto mode OFF" {
+		t.Errorf("statusMsg = %q, want 'Auto mode OFF'", model.statusMsg)
+	}
+}
+
+func TestModel_AutoModeOnlyOnDashboard(t *testing.T) {
+	model := NewModel(ModelConfig{MaxActive: 3})
+	model.width = 100
+	model.height = 40
+	model.activeTab = 1 // Tasks tab, not Dashboard
+
+	// Press 'a' on non-Dashboard tab
+	newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	model = newModel.(Model)
+
+	if model.autoMode {
+		t.Error("'a' should only toggle auto mode on Dashboard tab")
+	}
+}
+
 func TestModel_BatchStartMsg(t *testing.T) {
 	model := NewModel(ModelConfig{MaxActive: 3})
 	model.width = 100

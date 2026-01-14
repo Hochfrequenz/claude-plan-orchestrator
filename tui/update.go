@@ -372,6 +372,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusMsg = "Batch resumed"
 				}
 			}
+		case "a":
+			// Toggle auto mode (only on Dashboard tab)
+			if m.activeTab == 0 {
+				m.autoMode = !m.autoMode
+				if m.autoMode {
+					m.statusMsg = "Auto mode ON - will start tasks as slots become available"
+					// If not batch running and slots available, start immediately
+					if !m.batchRunning {
+						return m, m.tryStartAutoTasks()
+					}
+				} else {
+					m.statusMsg = "Auto mode OFF"
+				}
+			}
 		case "T":
 			// Test worker connection (only on Dashboard tab when build pool is connected)
 			if m.activeTab == 0 && m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
@@ -457,13 +471,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TickMsg:
 		// Refresh agent status from manager
-		if m.agentManager != nil && m.batchRunning {
+		if m.agentManager != nil && (m.batchRunning || m.autoMode) {
 			m.updateAgentsFromManager()
 		}
 		// Fetch workers if build pool is configured
 		cmds := []tea.Cmd{tickCmd()}
 		if m.buildPoolURL != "" {
 			cmds = append(cmds, fetchWorkersCmd(m.buildPoolURL))
+		}
+		// In auto mode, periodically try to start new tasks
+		if m.autoMode && !m.batchPaused && !m.batchRunning {
+			if cmd := m.tryStartAutoTasks(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		return m, tea.Batch(cmds...)
 
@@ -533,7 +553,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if allDone && m.batchRunning {
 			m.batchRunning = false
+			if m.autoMode {
+				// In auto mode, check if more tasks are now ready
+				return m, m.tryStartAutoTasks()
+			}
 			m.statusMsg = "Batch complete"
+		} else if m.autoMode && !m.batchPaused {
+			// In auto mode, try to start more tasks as agents complete
+			return m, m.tryStartAutoTasks()
 		}
 		return m, nil
 
@@ -800,7 +827,9 @@ func (m *Model) updateAgentsFromManager() {
 	// Check if batch is complete
 	if allDone && m.batchRunning && len(m.agents) > 0 {
 		m.batchRunning = false
-		m.statusMsg = "Batch complete"
+		if !m.autoMode {
+			m.statusMsg = "Batch complete"
+		}
 	}
 }
 
@@ -1168,4 +1197,51 @@ func applyResolutionsCmd(syncer *isync.Syncer, store *taskstore.Store, resolutio
 		err := syncer.ResolveConflicts(store, resolutions)
 		return SyncResolveMsg{Err: err}
 	}
+}
+
+// tryStartAutoTasks checks if we can start more tasks in auto mode
+func (m *Model) tryStartAutoTasks() tea.Cmd {
+	if !m.autoMode || m.batchPaused {
+		return nil
+	}
+
+	// Calculate available slots
+	slotsAvailable := m.maxActive - m.activeCount
+	if slotsAvailable <= 0 || len(m.queued) == 0 {
+		return nil
+	}
+
+	// Get in-progress task IDs from currently running agents
+	inProgress := make(map[string]bool)
+	for _, a := range m.agents {
+		if a.Status == executor.AgentRunning {
+			inProgress[a.TaskID] = true
+		}
+	}
+
+	// Use scheduler to select tasks that don't conflict with running agents
+	sched := scheduler.New(m.queued, m.completedTasks)
+	readyTasks := sched.GetReadyTasksExcluding(slotsAvailable, inProgress)
+
+	if len(readyTasks) == 0 {
+		// No tasks ready - check if we're done
+		if len(m.queued) == 0 {
+			m.autoMode = false
+			m.statusMsg = "Auto mode: all tasks complete!"
+		}
+		return nil
+	}
+
+	// Start the batch
+	m.batchRunning = true
+	m.batchPaused = false
+	m.statusMsg = fmt.Sprintf("Auto: starting %d task(s)...", len(readyTasks))
+
+	return startBatchCmd(
+		m.projectRoot,
+		readyTasks,
+		m.worktreeManager,
+		m.agentManager,
+		m.planWatcher,
+	)
 }
