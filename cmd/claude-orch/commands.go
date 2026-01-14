@@ -746,7 +746,7 @@ func runBuildPoolTest(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Running build pool agent test...")
-	fmt.Println("This will spawn a Claude agent to test all MCP tools.\n")
+	fmt.Println("This will spawn a Claude agent to test all MCP tools.")
 
 	result, err := buildpool.RunTestAgent(ctx, buildpool.TestAgentConfig{
 		BuildPoolURL: buildPoolURL,

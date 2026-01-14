@@ -210,6 +210,11 @@ func NewModel(cfg ModelConfig) Model {
 		agentMgr.SetSyncer(syncer)
 	}
 
+	// Set build pool URL if configured
+	if cfg.BuildPoolURL != "" {
+		agentMgr.SetBuildPoolURL(cfg.BuildPoolURL)
+	}
+
 	worktreeMgr := cfg.WorktreeManager
 	if worktreeMgr == nil && cfg.ProjectRoot != "" && cfg.WorktreeDir != "" {
 		worktreeMgr = executor.NewWorktreeManager(cfg.ProjectRoot, cfg.WorktreeDir)

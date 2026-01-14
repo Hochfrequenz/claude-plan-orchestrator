@@ -583,6 +583,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.completedTasks = make(map[string]bool)
 					}
 					m.completedTasks[msg.TaskID] = true
+					// Update task status in allTasks for module statistics
+					for j, task := range m.allTasks {
+						if task.ID.String() == msg.TaskID {
+							m.allTasks[j].Status = domain.StatusComplete
+							break
+						}
+					}
 					// Mark for removal from agents list
 					completedIdx = i
 				} else {
@@ -598,6 +605,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedAgent >= len(m.agents) && m.selectedAgent > 0 {
 				m.selectedAgent--
 			}
+			// Recompute module summaries
+			m.modules = computeModuleSummaries(m.allTasks)
 		}
 		// Update active count
 		m.activeCount = 0
@@ -909,6 +918,13 @@ func (m *Model) updateAgentsFromManager() {
 				m.completedTasks = make(map[string]bool)
 			}
 			m.completedTasks[av.TaskID] = true
+			// Update task status in allTasks for module statistics
+			for j, task := range m.allTasks {
+				if task.ID.String() == av.TaskID {
+					m.allTasks[j].Status = domain.StatusComplete
+					break
+				}
+			}
 			// Mark for removal from agents list
 			toRemove = append(toRemove, i)
 		}
@@ -932,6 +948,10 @@ func (m *Model) updateAgentsFromManager() {
 		if m.selectedAgent < 0 {
 			m.selectedAgent = 0
 		}
+	}
+	// Recompute module summaries if any agents completed
+	if len(toRemove) > 0 {
+		m.modules = computeModuleSummaries(m.allTasks)
 	}
 
 	// Check if batch is complete
@@ -1066,6 +1086,7 @@ func startBatchCmd(
 				EpicFilePath: task.FilePath, // For sync callback to update epic status
 				Status:       executor.AgentQueued,
 				Prompt:       prompt,
+				BuildPoolURL: agentMgr.GetBuildPoolURL(),
 			}
 
 			// Set up status change callback if manager has persistence

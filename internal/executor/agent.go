@@ -52,6 +52,7 @@ type Agent struct {
 	Output       []string
 	Error        error
 	SessionID    string // Claude Code session ID for resume capability
+	BuildPoolURL string // URL for build pool coordinator (if configured)
 
 	// Token usage from Claude session
 	TokensInput  int
@@ -99,6 +100,7 @@ type AgentManager struct {
 	agents        map[string]*Agent
 	store         AgentStore
 	syncer        *isync.Syncer
+	buildPoolURL  string
 	mu            sync.RWMutex
 }
 
@@ -118,6 +120,20 @@ func (m *AgentManager) SetStore(store AgentStore) {
 // SetSyncer sets the syncer for updating epic and README status
 func (m *AgentManager) SetSyncer(syncer *isync.Syncer) {
 	m.syncer = syncer
+}
+
+// SetBuildPoolURL sets the URL for the build pool coordinator
+func (m *AgentManager) SetBuildPoolURL(url string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.buildPoolURL = url
+}
+
+// GetBuildPoolURL returns the URL for the build pool coordinator
+func (m *AgentManager) GetBuildPoolURL() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.buildPoolURL
 }
 
 // SetMaxConcurrent updates the maximum number of concurrent agents
@@ -658,14 +674,14 @@ func (a *Agent) generateMCPConfig() string {
 		}
 	}
 
-	// 2. Add build-mcp if available (orchestrator's own MCP)
+	// 2. Add build-mcp if available (orchestrator's own MCP) and build pool URL is configured
 	buildMCPPath := findBuildMCP()
-	if buildMCPPath != "" {
+	if buildMCPPath != "" && a.BuildPoolURL != "" {
 		mcpServers["build-pool"] = map[string]interface{}{
 			"command": buildMCPPath,
 			"args":    []string{},
 			"env": map[string]string{
-				"BUILD_POOL_URL": "http://localhost:8081",
+				"BUILD_POOL_URL": a.BuildPoolURL,
 			},
 		}
 	}
