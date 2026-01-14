@@ -15,7 +15,6 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
-	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/skills"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
@@ -263,10 +262,6 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	plansDir := cfg.General.ProjectRoot + "/docs/plans"
-	tasks, err := parser.ParsePlansDir(plansDir)
-	if err != nil {
-		return err
-	}
 
 	store, err := taskstore.New(cfg.General.DatabasePath)
 	if err != nil {
@@ -274,13 +269,31 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	for _, task := range tasks {
-		if err := store.UpsertTask(task); err != nil {
-			return fmt.Errorf("upserting %s: %w", task.ID.String(), err)
-		}
+	syncer := sync.New(plansDir)
+	result, err := syncer.TwoWaySync(store)
+	if err != nil {
+		return fmt.Errorf("sync failed: %w", err)
 	}
 
-	fmt.Printf("Synced %d tasks from %s\n", len(tasks), plansDir)
+	// Report results
+	if result.MarkdownToDBCount > 0 {
+		fmt.Printf("Synced %d tasks from markdown to database\n", result.MarkdownToDBCount)
+	}
+	if result.DBToMarkdownCount > 0 {
+		fmt.Printf("Synced %d tasks from database to markdown\n", result.DBToMarkdownCount)
+	}
+
+	// Report conflicts
+	if len(result.Conflicts) > 0 {
+		fmt.Printf("\n%d conflicts detected:\n", len(result.Conflicts))
+		for _, c := range result.Conflicts {
+			fmt.Printf("  %s: DB=%s, Markdown=%s\n", c.TaskID, c.DBStatus, c.MarkdownStatus)
+		}
+		fmt.Println("\nUse 'claude-orch tui' to resolve conflicts interactively.")
+	} else {
+		fmt.Println("No conflicts found.")
+	}
+
 	return nil
 }
 
