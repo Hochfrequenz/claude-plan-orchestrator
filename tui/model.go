@@ -9,6 +9,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	isync "github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
 )
 
 // ViewMode determines how tasks are displayed
@@ -29,6 +30,14 @@ type ModuleSummary struct {
 	PassedTests    int
 	FailedTests    int
 	Coverage       string
+}
+
+// SyncConflictModal holds state for the sync conflict resolution modal
+type SyncConflictModal struct {
+	Visible     bool
+	Conflicts   []isync.SyncConflict
+	Resolutions map[string]string // taskID -> "db" | "markdown" | ""
+	Selected    int               // Currently highlighted conflict
 }
 
 // Model is the TUI application model
@@ -90,6 +99,12 @@ type Model struct {
 
 	// Mouse mode toggle
 	mouseEnabled bool
+
+	// Sync modal state
+	syncModal    SyncConflictModal
+	syncFlash    string
+	syncFlashExp time.Time
+	store        *taskstore.Store
 }
 
 // AgentView represents an agent in the TUI
@@ -139,6 +154,7 @@ type ModelConfig struct {
 	RecoveredAgents []*AgentView // Agents recovered from previous session
 	PlanWatcher     *observer.PlanWatcher
 	PlanChangeChan  chan PlanSyncMsg
+	Store           *taskstore.Store // Database store for sync operations
 }
 
 // NewModel creates a new TUI model
@@ -227,6 +243,8 @@ func NewModel(cfg ModelConfig) Model {
 		planChangeChan:  cfg.PlanChangeChan,
 		statusMsg:       statusMsg,
 		mouseEnabled:    true,
+		store:           cfg.Store,
+		syncModal:       SyncConflictModal{Resolutions: make(map[string]string)},
 	}
 }
 
