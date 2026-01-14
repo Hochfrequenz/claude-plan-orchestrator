@@ -10,3 +10,4 @@
 .DS_Store
 /claude-orch
 /build-agent
+.worktrees/
