@@ -531,8 +531,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case TickMsg:
-		// Refresh agent status from manager
-		if m.agentManager != nil && (m.batchRunning || m.autoMode) {
+		// Refresh agent status from manager (always update if we have running agents)
+		if m.agentManager != nil {
 			m.updateAgentsFromManager()
 		}
 		// Update test agent output from shared buffer
@@ -849,9 +849,9 @@ func (m *Model) updateTestAgentOutput() {
 		return
 	}
 
-	// Find the test agent and update its output
+	// Find the test agent and update its output (update while running)
 	for i, a := range m.agents {
-		if a.TaskID == taskID && a.Status == executor.AgentRunning {
+		if a.TaskID == taskID {
 			m.agents[i].Output = output
 			break
 		}

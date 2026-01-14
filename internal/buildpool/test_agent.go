@@ -130,15 +130,9 @@ func RunTestAgent(ctx context.Context, config TestAgentConfig, onOutput TestAgen
 		for line := range outputCh {
 			outputLines = append(outputLines, line)
 			if onOutput != nil {
-				// For stream-json, extract text content
-				if config.Verbose {
-					text := extractTextFromStreamJSON(line)
-					if text != "" {
-						onOutput(text)
-					}
-				} else {
-					onOutput(line)
-				}
+				// Always pass raw lines to callback for streaming display
+				// The TUI's formatClaudeOutput will handle JSON parsing
+				onOutput(line)
 			}
 		}
 		close(doneCh)
