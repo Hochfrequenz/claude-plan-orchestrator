@@ -34,6 +34,9 @@ func main() {
 	rootCmd.Flags().IntVar(&maxJobs, "jobs", 4, "Maximum concurrent jobs")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Enable verbose logging for heartbeat diagnostics")
 
+	// Add service management subcommand
+	rootCmd.AddCommand(newServiceCmd())
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
