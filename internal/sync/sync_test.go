@@ -79,6 +79,22 @@ func TestUpdateREADMEStatus(t *testing.T) {
 	}
 }
 
+func TestUpdateREADMEStatus_NoReadme(t *testing.T) {
+	// Test that UpdateTaskStatus gracefully handles missing README.md
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	os.MkdirAll(plansDir, 0755)
+
+	// Don't create README.md - it should not exist
+	syncer := New(plansDir)
+
+	// UpdateTaskStatus should return nil (no-op) when README.md doesn't exist
+	err := syncer.UpdateTaskStatus(domain.TaskID{Module: "technical", EpicNum: 0}, domain.StatusInProgress)
+	if err != nil {
+		t.Errorf("UpdateTaskStatus should succeed when README.md is missing, got error: %v", err)
+	}
+}
+
 func TestUpdateEpicFile(t *testing.T) {
 	// Create directory structure: {root}/docs/plans/technical-module/
 	root := t.TempDir()

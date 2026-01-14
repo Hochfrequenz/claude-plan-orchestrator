@@ -45,10 +45,17 @@ func StatusEmoji(status domain.TaskStatus) string {
 	}
 }
 
-// UpdateTaskStatus updates the task status in README.md at the project root
+// UpdateTaskStatus updates the task status in README.md at the project root.
+// If README.md does not exist, this is a no-op.
 func (s *Syncer) UpdateTaskStatus(taskID domain.TaskID, status domain.TaskStatus) error {
 	// README.md is at project root, not in docs/plans
 	readmePath := filepath.Join(s.projectRoot, "README.md")
+
+	// Skip if README.md doesn't exist
+	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
+		return nil
+	}
+
 	content, err := os.ReadFile(readmePath)
 	if err != nil {
 		return err
@@ -242,12 +249,15 @@ func (s *Syncer) GitCommitAndPush(taskID domain.TaskID, status domain.TaskStatus
 func (s *Syncer) gitCommitAndPushLocked(taskID domain.TaskID, status domain.TaskStatus, epicFilePath string) error {
 	root := s.projectRoot
 
-	// Stage README.md at project root
-	readmePath := filepath.Join(root, "README.md")
-	relReadme, _ := filepath.Rel(root, readmePath)
-
 	// Build list of files to stage
-	filesToStage := []string{relReadme}
+	var filesToStage []string
+
+	// Stage README.md at project root only if it exists
+	readmePath := filepath.Join(root, "README.md")
+	if _, err := os.Stat(readmePath); err == nil {
+		relReadme, _ := filepath.Rel(root, readmePath)
+		filesToStage = append(filesToStage, relReadme)
+	}
 
 	// Also stage the epic file if provided
 	if epicFilePath != "" {
@@ -255,6 +265,11 @@ func (s *Syncer) gitCommitAndPushLocked(taskID domain.TaskID, status domain.Task
 		if err == nil {
 			filesToStage = append(filesToStage, relEpic)
 		}
+	}
+
+	// If no files to stage, nothing to do
+	if len(filesToStage) == 0 {
+		return nil
 	}
 
 	// Stage all files
