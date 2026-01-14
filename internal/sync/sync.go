@@ -347,6 +347,57 @@ type SyncConflict struct {
 	EpicFilePath   string
 }
 
+// ResolveConflicts applies user resolutions to sync conflicts.
+// resolutions maps taskID to "db" or "markdown" indicating which source wins.
+func (s *Syncer) ResolveConflicts(store *taskstore.Store, resolutions map[string]string) error {
+	for taskID, resolution := range resolutions {
+		// Parse task ID
+		tid, err := domain.ParseTaskID(taskID)
+		if err != nil {
+			return fmt.Errorf("parsing task ID %s: %w", taskID, err)
+		}
+
+		// Get task from DB
+		dbTask, err := store.GetTask(taskID)
+		if err != nil {
+			return fmt.Errorf("getting task %s from DB: %w", taskID, err)
+		}
+
+		switch resolution {
+		case "db":
+			// DB wins: update markdown to match DB
+			if dbTask.FilePath != "" {
+				if err := s.UpdateEpicFrontmatter(dbTask.FilePath, dbTask.Status); err != nil {
+					return fmt.Errorf("updating epic %s: %w", taskID, err)
+				}
+				if err := s.UpdateTaskStatus(tid, dbTask.Status); err != nil {
+					return fmt.Errorf("updating README for %s: %w", taskID, err)
+				}
+			}
+
+		case "markdown":
+			// Markdown wins: update DB to match markdown
+			mdTasks, err := parser.ParsePlansDir(s.plansDir)
+			if err != nil {
+				return fmt.Errorf("parsing plans: %w", err)
+			}
+			for _, mdTask := range mdTasks {
+				if mdTask.ID.String() == taskID {
+					if err := store.UpdateTaskStatus(taskID, mdTask.Status); err != nil {
+						return fmt.Errorf("updating DB for %s: %w", taskID, err)
+					}
+					break
+				}
+			}
+
+		default:
+			return fmt.Errorf("invalid resolution %q for %s (must be 'db' or 'markdown')", resolution, taskID)
+		}
+	}
+
+	return nil
+}
+
 // TwoWaySync performs a two-way sync between markdown files and the database.
 // Returns conflicts that need manual resolution.
 func (s *Syncer) TwoWaySync(store *taskstore.Store) (*SyncResult, error) {

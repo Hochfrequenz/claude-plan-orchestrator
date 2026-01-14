@@ -265,3 +265,148 @@ status: complete
 		t.Errorf("expected markdown status complete, got %s", c.MarkdownStatus)
 	}
 }
+
+func TestResolveConflicts_UseDB(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical-module")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Epic file says complete (use parser-expected naming: epic-NN-*.md)
+	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
+	content := `---
+status: complete
+---
+
+# E05: Validators
+`
+	os.WriteFile(epicPath, []byte(content), 0644)
+
+	// README at project root
+	readmePath := filepath.Join(root, "README.md")
+	readme := `# Project
+
+### Technical Module
+
+| Epic | Description | Status |
+|------|-------------|:------:|
+| [E05](docs/plans/technical-module/epic-05-validators.md) | Validators | 🟢 |
+`
+	os.WriteFile(readmePath, []byte(readme), 0644)
+
+	// DB says in_progress
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		Title:    "Validators",
+		Status:   domain.StatusInProgress,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+
+	// Resolve: use DB value (in_progress)
+	resolutions := map[string]string{
+		"technical/E05": "db",
+	}
+	err := syncer.ResolveConflicts(store, resolutions)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify markdown was updated to in_progress
+	updated, _ := os.ReadFile(epicPath)
+	if !strings.Contains(string(updated), "status: in_progress") {
+		t.Errorf("epic should have status: in_progress, got:\n%s", string(updated))
+	}
+
+	// Verify README emoji was updated
+	updatedReadme, _ := os.ReadFile(readmePath)
+	if !strings.Contains(string(updatedReadme), "🟡") {
+		t.Errorf("README should have 🟡, got:\n%s", string(updatedReadme))
+	}
+}
+
+func TestResolveConflicts_UseMarkdown(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical-module")
+	os.MkdirAll(moduleDir, 0755)
+
+	// Epic file says complete (use parser-expected naming: epic-NN-*.md)
+	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
+	content := `---
+status: complete
+---
+
+# E05: Validators
+`
+	os.WriteFile(epicPath, []byte(content), 0644)
+
+	// DB says in_progress
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		Title:    "Validators",
+		Status:   domain.StatusInProgress,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+
+	// Resolve: use markdown value (complete)
+	resolutions := map[string]string{
+		"technical/E05": "markdown",
+	}
+	err := syncer.ResolveConflicts(store, resolutions)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify DB was updated to complete
+	task, _ := store.GetTask("technical/E05")
+	if task.Status != domain.StatusComplete {
+		t.Errorf("DB should have status complete, got %s", task.Status)
+	}
+}
+
+func TestResolveConflicts_InvalidResolution(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "docs", "plans")
+	moduleDir := filepath.Join(plansDir, "technical-module")
+	os.MkdirAll(moduleDir, 0755)
+
+	epicPath := filepath.Join(moduleDir, "epic-05-validators.md")
+	content := `---
+status: complete
+---
+
+# E05: Validators
+`
+	os.WriteFile(epicPath, []byte(content), 0644)
+
+	store, _ := taskstore.New(":memory:")
+	defer store.Close()
+	store.UpsertTask(&domain.Task{
+		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		Title:    "Validators",
+		Status:   domain.StatusInProgress,
+		FilePath: epicPath,
+	})
+
+	syncer := New(plansDir)
+
+	// Try with invalid resolution value
+	resolutions := map[string]string{
+		"technical/E05": "invalid",
+	}
+	err := syncer.ResolveConflicts(store, resolutions)
+	if err == nil {
+		t.Error("expected error for invalid resolution")
+	}
+	if !strings.Contains(err.Error(), "invalid resolution") {
+		t.Errorf("expected 'invalid resolution' error, got: %v", err)
+	}
+}
