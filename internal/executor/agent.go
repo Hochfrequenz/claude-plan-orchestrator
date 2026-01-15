@@ -682,6 +682,9 @@ func (a *Agent) generateMCPConfig() string {
 				"BUILD_POOL_URL": a.BuildPoolURL,
 			},
 		}
+	} else if buildMCPPath != "" && a.BuildPoolURL == "" {
+		// Log warning: build-mcp found but no URL configured
+		fmt.Fprintf(os.Stderr, "Warning: build-mcp found at %s but BuildPoolURL not set for agent %s\n", buildMCPPath, a.TaskID.String())
 	}
 
 	// Return empty if no MCPs configured
