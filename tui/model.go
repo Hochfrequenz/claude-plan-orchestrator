@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/maintenance"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	isync "github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
@@ -47,6 +48,17 @@ type SyncConflictModal struct {
 	Conflicts   []isync.SyncConflict
 	Resolutions map[string]string // taskID -> "db" | "markdown" | ""
 	Selected    int               // Currently highlighted conflict
+}
+
+// MaintenanceModal holds state for the maintenance task selection modal
+type MaintenanceModal struct {
+	Visible      bool
+	Templates    []maintenance.Template
+	Selected     int    // Currently highlighted template
+	Phase        int    // 0=select template, 1=select scope
+	SelectedScope string // "module", "package", "all"
+	CustomPrompt string // For custom template input
+	TargetModule string // Selected module name for scope
 }
 
 // Model is the TUI application model
@@ -118,6 +130,9 @@ type Model struct {
 	syncFlashExp time.Time
 	store        *taskstore.Store
 	syncer       *isync.Syncer
+
+	// Maintenance modal state
+	maintenanceModal MaintenanceModal
 }
 
 // AgentView represents an agent in the TUI

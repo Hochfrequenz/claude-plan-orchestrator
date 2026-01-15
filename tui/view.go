@@ -197,7 +197,7 @@ func (m Model) View() string {
 			statusBar = fmt.Sprintf(" [tab]switch [+/-]max agents %s [q]uit ", mouseHint)
 		}
 	case 3: // Modules
-		statusBar = fmt.Sprintf(" [tab]switch [j/k]scroll [s]sync [x]run tests %s [q]uit ", mouseHint)
+		statusBar = fmt.Sprintf(" [tab]switch [j/k]scroll [m]aint [s]sync [x]run tests %s [q]uit ", mouseHint)
 	default:
 		testHint := ""
 		if m.buildPoolStatus == "connected" {
@@ -266,6 +266,68 @@ func (m Model) View() string {
 					modalLineIdx := i - topPadding
 					if modalLineIdx < len(centeredModalLines) {
 						// Use modal line (already centered)
+						result.WriteString(strings.TrimRight(centeredModalLines[modalLineIdx], " "))
+					} else {
+						result.WriteString(line)
+					}
+				} else {
+					result.WriteString(line)
+				}
+				if i < len(contentLines)-1 {
+					result.WriteString("\n")
+				}
+			}
+			return result.String()
+		}
+	}
+
+	// Render maintenance modal overlay if visible
+	if m.maintenanceModal.Visible {
+		modal := m.renderMaintenanceModal()
+		if modal != "" {
+			// Center the modal horizontally
+			modalLines := strings.Split(modal, "\n")
+			var centeredModal strings.Builder
+			for _, line := range modalLines {
+				// Calculate padding to center
+				padding := (m.width - lipgloss.Width(line)) / 2
+				if padding < 0 {
+					padding = 0
+				}
+				centeredModal.WriteString(strings.Repeat(" ", padding))
+				centeredModal.WriteString(line)
+				centeredModal.WriteString("\n")
+			}
+			// Add vertical padding and overlay
+			content := b.String()
+			contentLines := strings.Split(content, "\n")
+			modalHeight := len(modalLines)
+			contentHeight := len(contentLines)
+
+			// Ensure we have enough lines to fit the modal
+			minRequiredHeight := modalHeight + 4
+			if contentHeight < minRequiredHeight {
+				for i := contentHeight; i < minRequiredHeight; i++ {
+					contentLines = append(contentLines, strings.Repeat(" ", m.width))
+				}
+				contentHeight = len(contentLines)
+			}
+
+			// Calculate vertical position (roughly centered)
+			topPadding := (contentHeight - modalHeight) / 2
+			if topPadding < 2 {
+				topPadding = 2
+			}
+
+			// Pre-split centered modal for efficiency
+			centeredModalLines := strings.Split(centeredModal.String(), "\n")
+
+			// Rebuild content with modal overlay
+			var result strings.Builder
+			for i, line := range contentLines {
+				if i >= topPadding && i < topPadding+modalHeight {
+					modalLineIdx := i - topPadding
+					if modalLineIdx < len(centeredModalLines) {
 						result.WriteString(strings.TrimRight(centeredModalLines[modalLineIdx], " "))
 					} else {
 						result.WriteString(line)
@@ -1392,4 +1454,72 @@ func renderConflictLine(conflict isync.SyncConflict, resolution string, selected
 		return modalSelectedStyle.Render("▸ " + line)
 	}
 	return queuedStyle.Render("  " + line)
+}
+
+// renderMaintenanceModal renders the maintenance task selection modal
+func (m Model) renderMaintenanceModal() string {
+	var b strings.Builder
+
+	// Title
+	b.WriteString(modalTitleStyle.Render("MAINTENANCE TASKS"))
+	b.WriteString("\n\n")
+
+	if m.maintenanceModal.Phase == 0 {
+		// Phase 0: Template selection
+		b.WriteString(queuedStyle.Render("Select a maintenance task:"))
+		b.WriteString("\n\n")
+
+		for i, tmpl := range m.maintenanceModal.Templates {
+			selected := i == m.maintenanceModal.Selected
+			line := fmt.Sprintf("%-20s  %s", tmpl.Name, tmpl.Description)
+			if selected {
+				b.WriteString(modalSelectedStyle.Render("▸ " + line))
+			} else {
+				b.WriteString(queuedStyle.Render("  " + line))
+			}
+			b.WriteString("\n")
+		}
+
+		b.WriteString("\n")
+		b.WriteString(queuedStyle.Render("[j/k] navigate  [enter] select  [esc] cancel"))
+	} else {
+		// Phase 1: Scope selection
+		tmpl := m.maintenanceModal.Templates[m.maintenanceModal.Selected]
+		b.WriteString(queuedStyle.Render(fmt.Sprintf("Apply \"%s\" to:", tmpl.Name)))
+		b.WriteString("\n\n")
+
+		// Module scope option
+		moduleName := m.maintenanceModal.TargetModule
+		if moduleName == "" {
+			moduleName = "(no module selected)"
+		}
+		b.WriteString(runningStyle.Render("[1]"))
+		b.WriteString(queuedStyle.Render(fmt.Sprintf(" Module: %s", moduleName)))
+		b.WriteString("\n")
+
+		// Package scope option
+		b.WriteString(runningStyle.Render("[2]"))
+		b.WriteString(queuedStyle.Render(fmt.Sprintf(" Package: internal/%s", moduleName)))
+		b.WriteString("\n")
+
+		// All scope option
+		b.WriteString(runningStyle.Render("[3]"))
+		b.WriteString(queuedStyle.Render(" Entire codebase"))
+		b.WriteString("\n\n")
+
+		b.WriteString(queuedStyle.Render("[1-3] select scope  [esc] back"))
+	}
+
+	// Wrap in modal style
+	modalContent := b.String()
+	modalWidth := 55
+	if m.width > 65 {
+		modalWidth = 55
+	} else if m.width > 45 {
+		modalWidth = m.width - 10
+	} else {
+		modalWidth = m.width - 4
+	}
+
+	return modalStyle.Width(modalWidth).Render(modalContent)
 }

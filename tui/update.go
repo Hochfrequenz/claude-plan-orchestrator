@@ -16,6 +16,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/buildprotocol"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/maintenance"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/mcp"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/parser"
@@ -106,6 +107,13 @@ type AgentTestMsg struct {
 	Error   string
 }
 
+// MaintenanceStartMsg reports the result of starting a maintenance task
+type MaintenanceStartMsg struct {
+	TaskID  string
+	Success bool
+	Error   string
+}
+
 // AgentTestOutputMsg reports streaming output from the agent test
 type AgentTestOutputMsg struct {
 	TaskID string
@@ -188,6 +196,68 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncModal.Resolutions = make(map[string]string)
 				m.syncModal.Selected = 0
 				m.statusMsg = "Sync cancelled"
+				return m, nil
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil // Consume all other keys when modal is open
+		}
+
+		// Handle maintenance modal keys
+		if m.maintenanceModal.Visible {
+			switch msg.String() {
+			case "j", "down":
+				if m.maintenanceModal.Phase == 0 {
+					if m.maintenanceModal.Selected < len(m.maintenanceModal.Templates)-1 {
+						m.maintenanceModal.Selected++
+					}
+				}
+				return m, nil
+			case "k", "up":
+				if m.maintenanceModal.Phase == 0 {
+					if m.maintenanceModal.Selected > 0 {
+						m.maintenanceModal.Selected--
+					}
+				}
+				return m, nil
+			case "enter":
+				if m.maintenanceModal.Phase == 0 {
+					// Move to scope selection
+					m.maintenanceModal.Phase = 1
+					// Set target module from current selection
+					if m.selectedModule < len(m.modules) {
+						m.maintenanceModal.TargetModule = m.modules[m.selectedModule].Name
+					}
+				}
+				return m, nil
+			case "1":
+				if m.maintenanceModal.Phase == 1 {
+					m.maintenanceModal.SelectedScope = "module"
+					return m, m.startMaintenanceTask()
+				}
+				return m, nil
+			case "2":
+				if m.maintenanceModal.Phase == 1 {
+					m.maintenanceModal.SelectedScope = "package"
+					return m, m.startMaintenanceTask()
+				}
+				return m, nil
+			case "3":
+				if m.maintenanceModal.Phase == 1 {
+					m.maintenanceModal.SelectedScope = "all"
+					return m, m.startMaintenanceTask()
+				}
+				return m, nil
+			case "esc":
+				if m.maintenanceModal.Phase == 1 {
+					// Go back to template selection
+					m.maintenanceModal.Phase = 0
+				} else {
+					// Close modal
+					m.maintenanceModal.Visible = false
+					m.maintenanceModal.Phase = 0
+					m.maintenanceModal.Selected = 0
+				}
 				return m, nil
 			case "q", "ctrl+c":
 				return m, tea.Quit
@@ -318,9 +388,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = 1
 			m.taskScroll = 0
 		case "m":
-			// Toggle to modules tab
-			m.activeTab = 3
-			m.taskScroll = 0
+			if m.activeTab == 3 && !m.syncModal.Visible && !m.testRunning {
+				// On Modules tab: open maintenance modal
+				m.maintenanceModal.Visible = true
+				m.maintenanceModal.Phase = 0
+				m.maintenanceModal.Selected = 0
+				m.maintenanceModal.Templates = maintenance.BuiltinTemplates
+				// Set target module from current selection
+				if m.selectedModule < len(m.modules) {
+					m.maintenanceModal.TargetModule = m.modules[m.selectedModule].Name
+				}
+			} else {
+				// Not on Modules tab: switch to modules tab
+				m.activeTab = 3
+				m.taskScroll = 0
+			}
 		case "v":
 			// Toggle view mode (priority/module)
 			if m.viewMode == ViewByPriority {
@@ -846,6 +928,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.agentHistory = msg.History
 			m.statusMsg = fmt.Sprintf("Showing %d historical runs (h to hide)", len(msg.History))
+		}
+		return m, nil
+
+	case MaintenanceStartMsg:
+		if msg.Success {
+			// Add maintenance agent to the view
+			m.agents = append(m.agents, &AgentView{
+				TaskID: msg.TaskID,
+				Title:  msg.TaskID, // Use task ID as title
+				Status: executor.AgentRunning,
+			})
+			m.activeCount++
+			m.batchRunning = true
+			m.statusMsg = fmt.Sprintf("Started maintenance task: %s", msg.TaskID)
+		} else {
+			m.statusMsg = fmt.Sprintf("Maintenance failed: %s", msg.Error)
 		}
 		return m, nil
 	}
@@ -1658,5 +1756,87 @@ func loadAgentHistoryCmd(store *taskstore.Store) tea.Cmd {
 		}
 
 		return AgentHistoryMsg{History: history}
+	}
+}
+
+// startMaintenanceTask starts a maintenance task agent
+func (m *Model) startMaintenanceTask() tea.Cmd {
+	// Capture state needed for the command
+	template := m.maintenanceModal.Templates[m.maintenanceModal.Selected]
+	scope := m.maintenanceModal.SelectedScope
+	targetModule := m.maintenanceModal.TargetModule
+	projectRoot := m.projectRoot
+	wtMgr := m.worktreeManager
+	agentMgr := m.agentManager
+	planWatcher := m.planWatcher
+
+	// Close the modal immediately
+	m.maintenanceModal.Visible = false
+	m.maintenanceModal.Phase = 0
+	m.maintenanceModal.Selected = 0
+	m.statusMsg = fmt.Sprintf("Starting %s task...", template.Name)
+
+	return func() tea.Msg {
+		// Generate a unique task ID for this maintenance run
+		timestamp := time.Now().Format("20060102-150405")
+		taskID := fmt.Sprintf("maint/%s-%s", template.ID, timestamp)
+
+		// Create worktree if manager is available
+		var wtPath string
+		if wtMgr != nil {
+			// Use a pseudo TaskID for worktree creation
+			pseudoID := domain.TaskID{Module: "maint", EpicNum: int(time.Now().Unix() % 10000)}
+			var err error
+			wtPath, err = wtMgr.Create(pseudoID)
+			if err != nil {
+				return MaintenanceStartMsg{
+					TaskID:  taskID,
+					Success: false,
+					Error:   fmt.Sprintf("failed to create worktree: %v", err),
+				}
+			}
+			// Add worktree to plan watcher
+			if planWatcher != nil {
+				planWatcher.AddWorktree(wtPath)
+			}
+		} else {
+			wtPath = projectRoot
+		}
+
+		// Build the prompt
+		prompt := executor.BuildMaintenancePrompt(template.Prompt, scope, targetModule)
+
+		// Create and start the agent
+		agent := &executor.Agent{
+			TaskID:       domain.TaskID{Module: "maint", EpicNum: int(time.Now().Unix() % 10000)},
+			WorktreePath: wtPath,
+			Status:       executor.AgentQueued,
+			Prompt:       prompt,
+		}
+
+		if agentMgr != nil {
+			agent.BuildPoolURL = agentMgr.GetBuildPoolURL()
+			agent.OnStatusChange = agentMgr.CreateStatusCallback()
+
+			if agentMgr.CanStart() {
+				if err := agent.Start(context.Background()); err != nil {
+					// Clean up worktree on failure
+					if wtMgr != nil {
+						wtMgr.Remove(wtPath)
+					}
+					return MaintenanceStartMsg{
+						TaskID:  taskID,
+						Success: false,
+						Error:   fmt.Sprintf("failed to start agent: %v", err),
+					}
+				}
+			}
+			agentMgr.Add(agent)
+		}
+
+		return MaintenanceStartMsg{
+			TaskID:  taskID,
+			Success: true,
+		}
 	}
 }
