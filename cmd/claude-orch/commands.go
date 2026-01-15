@@ -360,10 +360,12 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Warning: failed to recover agents: %v\n", err)
 	}
 
-	// Start build pool coordinator if enabled
+	// Start build pool coordinator if enabled OR if local fallback is enabled
+	// This ensures agents get build MCP tools even when only using embedded worker
 	var buildPoolCoord *buildpool.Coordinator
 	var buildPoolGitDaemon *buildpool.GitDaemon
-	if cfg.BuildPool.Enabled {
+	startCoordinator := cfg.BuildPool.Enabled || cfg.BuildPool.LocalFallback.Enabled
+	if startCoordinator {
 		// Create registry
 		registry := buildpool.NewRegistry()
 
@@ -390,22 +392,24 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			Debug:             cfg.BuildPool.Debug,
 		}, registry, dispatcher)
 
-		// Start git daemon
-		buildPoolGitDaemon = buildpool.NewGitDaemon(buildpool.GitDaemonConfig{
-			Port:       cfg.BuildPool.GitDaemonPort,
-			BaseDir:    cfg.General.ProjectRoot,
-			ListenAddr: cfg.BuildPool.GitDaemonListenAddr,
-		})
-		if err := buildPoolGitDaemon.Start(ctx); err != nil {
-			fmt.Printf("Warning: failed to start git daemon: %v\n", err)
-		} else {
-			// Run coordinator in goroutine
-			go func() {
-				if err := buildPoolCoord.Start(ctx); err != nil && ctx.Err() == nil {
-					fmt.Printf("Build pool coordinator error: %v\n", err)
-				}
-			}()
+		// Start git daemon only if full build pool is enabled (needed for remote workers)
+		if cfg.BuildPool.Enabled {
+			buildPoolGitDaemon = buildpool.NewGitDaemon(buildpool.GitDaemonConfig{
+				Port:       cfg.BuildPool.GitDaemonPort,
+				BaseDir:    cfg.General.ProjectRoot,
+				ListenAddr: cfg.BuildPool.GitDaemonListenAddr,
+			})
+			if err := buildPoolGitDaemon.Start(ctx); err != nil {
+				fmt.Printf("Warning: failed to start git daemon: %v\n", err)
+			}
 		}
+
+		// Run coordinator in goroutine (always, even if git daemon failed or wasn't started)
+		go func() {
+			if err := buildPoolCoord.Start(ctx); err != nil && ctx.Err() == nil {
+				fmt.Printf("Build pool coordinator error: %v\n", err)
+			}
+		}()
 	}
 
 	// Convert recovered agents to AgentViews for TUI
@@ -470,9 +474,10 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build pool URL for TUI to fetch worker status
+	// Build pool URL for TUI to fetch worker status and for agents to use MCP tools
+	// Set when either full build pool or local fallback is enabled
 	var buildPoolURL string
-	if cfg.BuildPool.Enabled {
+	if cfg.BuildPool.Enabled || cfg.BuildPool.LocalFallback.Enabled {
 		buildPoolURL = fmt.Sprintf("http://localhost:%d", cfg.BuildPool.WebSocketPort)
 	}
 
