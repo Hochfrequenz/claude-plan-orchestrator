@@ -86,6 +86,13 @@ type AgentHistoryMsg struct {
 	Error   error
 }
 
+// HistoryLogsMsg contains loaded logs for a historical agent run
+type HistoryLogsMsg struct {
+	Index int      // Index in agentHistory slice
+	Lines []string // Log lines
+	Error error
+}
+
 // WorkersUpdateMsg updates the workers list from build pool
 type WorkersUpdateMsg struct {
 	Workers []*WorkerView
@@ -277,9 +284,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.taskScroll++
 			}
 			if m.activeTab == 2 { // Agents tab
-				if m.showAgentDetail {
+				if m.showAgentDetail || m.showHistoryDetail {
 					// Scroll agent output down
 					m.agentOutputScroll++
+				} else if m.showAgentHistory && len(m.agentHistory) > 0 {
+					// Navigate history list
+					if m.selectedHistory < len(m.agentHistory)-1 {
+						m.selectedHistory++
+					}
 				} else if m.selectedAgent < len(m.agents)-1 {
 					m.selectedAgent++
 				}
@@ -302,10 +314,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.taskScroll--
 			}
 			if m.activeTab == 2 { // Agents tab
-				if m.showAgentDetail {
+				if m.showAgentDetail || m.showHistoryDetail {
 					// Scroll agent output up
 					if m.agentOutputScroll > 0 {
 						m.agentOutputScroll--
+					}
+				} else if m.showAgentHistory && len(m.agentHistory) > 0 {
+					// Navigate history list
+					if m.selectedHistory > 0 {
+						m.selectedHistory--
 					}
 				} else if m.selectedAgent > 0 {
 					m.selectedAgent--
@@ -322,32 +339,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "g":
 			// Jump to top of agent output
-			if m.activeTab == 2 && m.showAgentDetail {
+			if m.activeTab == 2 && (m.showAgentDetail || m.showHistoryDetail) {
 				m.agentOutputScroll = 0
 			}
 		case "G":
 			// Jump to bottom of agent output (handled in view by setting to max)
-			if m.activeTab == 2 && m.showAgentDetail {
+			if m.activeTab == 2 && (m.showAgentDetail || m.showHistoryDetail) {
 				m.agentOutputScroll = -1 // Signal to jump to end
 			}
 		case "enter":
-			// Toggle agent detail view (only on Agents tab)
-			if m.activeTab == 2 && len(m.agents) > 0 {
-				m.showAgentDetail = !m.showAgentDetail
-				// For running agents, show bottom (most recent)
-				// For completed/failed agents, show from top (full output)
-				agent := m.agents[m.selectedAgent]
-				if agent.Status == executor.AgentRunning {
-					m.agentOutputScroll = -1 // Start at bottom (most recent)
-				} else {
-					m.agentOutputScroll = 0 // Start at top (see full output)
+			// Toggle agent/history detail view (only on Agents tab)
+			if m.activeTab == 2 {
+				if m.showAgentHistory && len(m.agentHistory) > 0 && m.selectedHistory < len(m.agentHistory) {
+					// Open history detail view - load logs from file
+					m.showHistoryDetail = true
+					m.agentOutputScroll = 0
+					histAgent := m.agentHistory[m.selectedHistory]
+					if histAgent.LogPath != "" {
+						// Load logs from file
+						return m, loadHistoryLogsCmd(histAgent.LogPath, m.selectedHistory)
+					}
+				} else if len(m.agents) > 0 && !m.showAgentDetail {
+					m.showAgentDetail = true
+					// For running agents, show bottom (most recent)
+					// For completed/failed agents, show from top (full output)
+					agent := m.agents[m.selectedAgent]
+					if agent.Status == executor.AgentRunning {
+						m.agentOutputScroll = -1 // Start at bottom (most recent)
+					} else {
+						m.agentOutputScroll = 0 // Start at top (see full output)
+					}
+				} else if m.showAgentDetail {
+					m.showAgentDetail = false
+					m.agentOutputScroll = 0
 				}
 			}
 		case "esc":
-			// Close agent detail view
+			// Close agent/history detail view
 			if m.activeTab == 2 {
-				m.showAgentDetail = false
-				m.agentOutputScroll = 0
+				if m.showHistoryDetail {
+					m.showHistoryDetail = false
+					m.agentOutputScroll = 0
+				} else {
+					m.showAgentDetail = false
+					m.agentOutputScroll = 0
+				}
 			}
 		case "r":
 			// On Agents tab: refresh in overview, resume in detail view
@@ -934,7 +970,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showAgentHistory = false
 		} else {
 			m.agentHistory = msg.History
+			m.selectedHistory = 0 // Reset selection
 			m.statusMsg = fmt.Sprintf("Showing %d historical runs (h to hide)", len(msg.History))
+		}
+		return m, nil
+
+	case HistoryLogsMsg:
+		if msg.Error != nil {
+			m.statusMsg = fmt.Sprintf("Failed to load logs: %v", msg.Error)
+		} else if msg.Index < len(m.agentHistory) {
+			m.agentHistory[msg.Index].Output = msg.Lines
+			m.statusMsg = fmt.Sprintf("Loaded %d log lines", len(msg.Lines))
 		}
 		return m, nil
 
@@ -1760,6 +1806,7 @@ func loadAgentHistoryCmd(store *taskstore.Store) tea.Cmd {
 				Duration:     duration,
 				Status:       status,
 				WorktreePath: run.WorktreePath,
+				LogPath:      run.LogPath,
 				Error:        run.ErrorMessage,
 				TokensInput:  run.TokensInput,
 				TokensOutput: run.TokensOutput,
@@ -1768,6 +1815,28 @@ func loadAgentHistoryCmd(store *taskstore.Store) tea.Cmd {
 		}
 
 		return AgentHistoryMsg{History: history}
+	}
+}
+
+// loadHistoryLogsCmd loads log output from a historical agent run's log file
+func loadHistoryLogsCmd(logPath string, index int) tea.Cmd {
+	return func() tea.Msg {
+		if logPath == "" {
+			return HistoryLogsMsg{Index: index, Error: fmt.Errorf("no log file path")}
+		}
+
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			return HistoryLogsMsg{Index: index, Error: fmt.Errorf("failed to read log file: %w", err)}
+		}
+
+		lines := strings.Split(string(data), "\n")
+		// Limit to last 500 lines to avoid memory issues
+		if len(lines) > 500 {
+			lines = lines[len(lines)-500:]
+		}
+
+		return HistoryLogsMsg{Index: index, Lines: lines}
 	}
 }
 

@@ -346,15 +346,19 @@ func (s *Store) UpdateAgentRunUsage(id string, tokensInput, tokensOutput int, co
 	return err
 }
 
-// ListRecentAgentRuns returns completed/failed agent runs, most recent first
+// ListRecentAgentRuns returns completed/failed agent runs, in chronological order (oldest first)
 func (s *Store) ListRecentAgentRuns(limit int) ([]*AgentRun, error) {
+	// Get the N most recent runs, then reverse to show in chronological order
 	rows, err := s.db.Query(`
 		SELECT id, task_id, worktree_path, log_path, pid, status, started_at, finished_at,
 		       error_message, COALESCE(session_id, ''), tokens_input, tokens_output, cost_usd
-		FROM agent_runs
-		WHERE status IN ('completed', 'failed')
-		ORDER BY COALESCE(finished_at, started_at) DESC
-		LIMIT ?
+		FROM (
+			SELECT * FROM agent_runs
+			WHERE status IN ('completed', 'failed')
+			ORDER BY COALESCE(finished_at, started_at) DESC
+			LIMIT ?
+		) sub
+		ORDER BY COALESCE(finished_at, started_at) ASC
 	`, limit)
 	if err != nil {
 		return nil, err

@@ -89,8 +89,10 @@ type Model struct {
 	showAgentDetail    bool
 	showAgentPrompt    bool // Toggle to show prompt instead of output
 	agentOutputScroll  int  // Scroll position for agent output
-	showAgentHistory   bool // Toggle to show completed/failed agent history
+	showAgentHistory   bool         // Toggle to show completed/failed agent history
 	agentHistory       []*AgentView // Historical agent runs from database
+	selectedHistory    int          // Selected index in history list
+	showHistoryDetail  bool         // Show detail view for selected history item
 	testRunning        bool
 	testOutput         string
 
@@ -144,6 +146,7 @@ type AgentView struct {
 	Status       executor.AgentStatus
 	Progress     string
 	WorktreePath string
+	LogPath      string   // Path to the log file (for historical runs)
 	Error        string
 	Output       []string // Last N lines of output
 	Prompt       string   // The prompt sent to the LLM

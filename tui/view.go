@@ -696,6 +696,11 @@ func (m Model) formatTaskLine(task *domain.Task) string {
 func (m Model) renderAgentsDetail() string {
 	var b strings.Builder
 
+	// If showing history detail, render that instead
+	if m.showHistoryDetail && len(m.agentHistory) > 0 && m.selectedHistory < len(m.agentHistory) {
+		return m.renderSelectedHistoryDetail()
+	}
+
 	// If showing agent detail, render that instead
 	if m.showAgentDetail && len(m.agents) > 0 && m.selectedAgent < len(m.agents) {
 		return m.renderSelectedAgentDetail()
@@ -785,7 +790,7 @@ func (m Model) renderAgentsDetail() string {
 			b.WriteString(queuedStyle.Render("  No completed runs found."))
 			b.WriteString("\n")
 		} else {
-			for _, agent := range m.agentHistory {
+			for i, agent := range m.agentHistory {
 				var statusIcon string
 				var style lipgloss.Style
 				switch agent.Status {
@@ -815,11 +820,18 @@ func (m Model) renderAgentsDetail() string {
 				line := fmt.Sprintf("  %s %-15s %8s%s  %s",
 					statusIcon, agent.TaskID,
 					formatDuration(agent.Duration), costStr, extra)
-				b.WriteString(style.Render(line))
+
+				// Highlight selected history item
+				if i == m.selectedHistory {
+					line = fmt.Sprintf("> %s", line[2:])
+					b.WriteString(tabActiveStyle.Render(line))
+				} else {
+					b.WriteString(style.Render(line))
+				}
 				b.WriteString("\n")
 			}
 		}
-		b.WriteString(queuedStyle.Render("  Press [h] to hide history"))
+		b.WriteString(queuedStyle.Render("  [j/k]navigate [enter]view logs [h]hide history"))
 	} else {
 		b.WriteString(queuedStyle.Render("  Press [h] to show completed/failed run history"))
 	}
@@ -1019,6 +1031,131 @@ func (m Model) renderSelectedAgentDetail() string {
 		promptHint = "[p]output"
 	}
 	b.WriteString(queuedStyle.Render(fmt.Sprintf("  [j/k]scroll [g]top [G]bottom %s [esc]back", promptHint)))
+
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func (m Model) renderSelectedHistoryDetail() string {
+	var b strings.Builder
+	agent := m.agentHistory[m.selectedHistory]
+
+	b.WriteString(titleStyle.Render(fmt.Sprintf("HISTORY DETAIL: %s", agent.TaskID)))
+	b.WriteString("\n\n")
+
+	// Status
+	var statusStr string
+	var style lipgloss.Style
+	switch agent.Status {
+	case executor.AgentCompleted:
+		statusStr = "Completed"
+		style = completedStyle
+	case executor.AgentFailed:
+		statusStr = "Failed"
+		style = warningStyle
+	default:
+		statusStr = string(agent.Status)
+		style = queuedStyle
+	}
+
+	b.WriteString(fmt.Sprintf("  Status:   %s\n", style.Render(statusStr)))
+	b.WriteString(fmt.Sprintf("  Task:     %s\n", agent.Title))
+	b.WriteString(fmt.Sprintf("  Duration: %s\n", formatDuration(agent.Duration)))
+	if agent.WorktreePath != "" {
+		b.WriteString(fmt.Sprintf("  Worktree: %s\n", agent.WorktreePath))
+	}
+	if agent.LogPath != "" {
+		b.WriteString(fmt.Sprintf("  Log:      %s\n", agent.LogPath))
+	}
+
+	// Show token usage if available
+	if agent.TokensInput > 0 || agent.TokensOutput > 0 {
+		b.WriteString(fmt.Sprintf("  Tokens:   %s in / %s out",
+			formatTokens(agent.TokensInput), formatTokens(agent.TokensOutput)))
+		if agent.CostUSD > 0 {
+			b.WriteString(fmt.Sprintf(" ($%.4f)", agent.CostUSD))
+		}
+		b.WriteString("\n")
+	}
+
+	// Error section
+	if agent.Error != "" {
+		b.WriteString("\n")
+		b.WriteString(warningStyle.Render("  ERROR:"))
+		b.WriteString("\n")
+		b.WriteString(warningStyle.Render(fmt.Sprintf("  %s", agent.Error)))
+		b.WriteString("\n")
+	}
+
+	// Log output section with scrolling
+	b.WriteString("\n")
+
+	// Calculate visible window
+	maxLines := 20
+	if m.height > 20 {
+		maxLines = m.height - 15 // Leave room for header and footer
+	}
+
+	maxWidth := 80
+	if m.width > 10 {
+		maxWidth = m.width - 10
+	}
+
+	if len(agent.Output) > 0 {
+		// Format the JSON output into readable lines
+		formattedLines := formatClaudeOutput(agent.Output, maxWidth)
+
+		totalLines := len(formattedLines)
+		scroll := m.agentOutputScroll
+
+		// Handle -1 as "jump to end"
+		if scroll < 0 || scroll > totalLines-maxLines {
+			scroll = totalLines - maxLines
+			if scroll < 0 {
+				scroll = 0
+			}
+		}
+
+		end := scroll + maxLines
+		if end > totalLines {
+			end = totalLines
+		}
+
+		// Header with scroll position
+		scrollInfo := ""
+		if totalLines > maxLines {
+			scrollInfo = fmt.Sprintf(" [%d-%d of %d]", scroll+1, end, totalLines)
+		}
+		b.WriteString(titleStyle.Render(fmt.Sprintf("  LOG OUTPUT%s:", scrollInfo)))
+		b.WriteString("\n")
+
+		// Show scroll indicator at top
+		if scroll > 0 {
+			b.WriteString(queuedStyle.Render("  ↑ (more above)"))
+			b.WriteString("\n")
+		}
+
+		// Show visible lines
+		for i := scroll; i < end; i++ {
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s", formattedLines[i])))
+			b.WriteString("\n")
+		}
+
+		// Show scroll indicator at bottom
+		if end < totalLines {
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  ↓ (%d more below)", totalLines-end)))
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString(queuedStyle.Render("  No log output available"))
+		b.WriteString("\n")
+		if agent.LogPath != "" {
+			b.WriteString(queuedStyle.Render("  Loading logs..."))
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(queuedStyle.Render("  [j/k]scroll [g]top [G]bottom [esc]back"))
 
 	return strings.TrimSuffix(b.String(), "\n")
 }
