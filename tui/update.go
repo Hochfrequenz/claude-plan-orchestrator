@@ -1143,7 +1143,9 @@ func (m *Model) updateAgentsFromManager() {
 	}
 
 	// Check if batch is complete
-	if allDone && m.batchRunning && len(m.agents) > 0 {
+	// Note: We check (len(m.agents) > 0 || len(toRemove) > 0) because completed agents
+	// were already removed from m.agents, so we need to account for them via toRemove
+	if allDone && m.batchRunning && (len(m.agents) > 0 || len(toRemove) > 0) {
 		m.batchRunning = false
 		if !m.autoMode {
 			m.statusMsg = "Batch complete"
