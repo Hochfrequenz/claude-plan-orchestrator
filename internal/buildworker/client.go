@@ -279,7 +279,13 @@ func (w *Worker) send(msgType string, payload interface{}) error {
 	if err != nil {
 		return err
 	}
-	return w.conn.WriteMessage(websocket.TextMessage, data)
+
+	// Set write deadline to prevent indefinite blocking on broken connections
+	w.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	err = w.conn.WriteMessage(websocket.TextMessage, data)
+	w.conn.SetWriteDeadline(time.Time{}) // Clear deadline
+
+	return err
 }
 
 // Stop gracefully shuts down the worker
