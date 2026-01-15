@@ -398,6 +398,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 				Port:       cfg.BuildPool.GitDaemonPort,
 				BaseDir:    cfg.General.ProjectRoot,
 				ListenAddr: cfg.BuildPool.GitDaemonListenAddr,
+				Debug:      cfg.BuildPool.Debug,
 			})
 			if err := buildPoolGitDaemon.Start(ctx); err != nil {
 				fmt.Printf("Warning: failed to start git daemon: %v\n", err)

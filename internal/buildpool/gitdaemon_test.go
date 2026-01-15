@@ -77,6 +77,7 @@ func TestGitDaemon_DefaultPort(t *testing.T) {
 }
 
 func TestGitDaemon_Args(t *testing.T) {
+	// Test without debug (no --verbose)
 	daemon := NewGitDaemon(GitDaemonConfig{
 		Port:    9999,
 		BaseDir: "/test/repo",
@@ -90,7 +91,6 @@ func TestGitDaemon_Args(t *testing.T) {
 		"--port=9999",
 		"--base-path=/test/repo",
 		"--export-all",
-		"--verbose",
 		"/test/repo",
 	}
 
@@ -104,6 +104,38 @@ func TestGitDaemon_Args(t *testing.T) {
 		}
 		if args[i] != exp {
 			t.Errorf("arg[%d]: expected %q, got %q", i, exp, args[i])
+		}
+	}
+
+	// Test with debug (includes --verbose)
+	daemonDebug := NewGitDaemon(GitDaemonConfig{
+		Port:    9999,
+		BaseDir: "/test/repo",
+		Debug:   true,
+	})
+
+	argsDebug := daemonDebug.Args()
+
+	expectedDebug := []string{
+		"daemon",
+		"--reuseaddr",
+		"--port=9999",
+		"--base-path=/test/repo",
+		"--export-all",
+		"--verbose",
+		"/test/repo",
+	}
+
+	if len(argsDebug) != len(expectedDebug) {
+		t.Errorf("debug: expected %d args, got %d", len(expectedDebug), len(argsDebug))
+	}
+
+	for i, exp := range expectedDebug {
+		if i >= len(argsDebug) {
+			break
+		}
+		if argsDebug[i] != exp {
+			t.Errorf("debug arg[%d]: expected %q, got %q", i, exp, argsDebug[i])
 		}
 	}
 }

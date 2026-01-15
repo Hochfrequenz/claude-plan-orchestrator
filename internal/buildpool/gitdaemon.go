@@ -4,6 +4,7 @@ package buildpool
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ type GitDaemonConfig struct {
 	Port       int
 	BaseDir    string
 	ListenAddr string // Optional: address to listen on (e.g., "127.0.0.1" for local only)
+	Debug      bool   // Enable verbose output (default: false to avoid TUI interference)
 }
 
 // GitDaemon manages a git daemon process
@@ -43,7 +45,10 @@ func (d *GitDaemon) Args() []string {
 		fmt.Sprintf("--port=%d", d.config.Port),
 		fmt.Sprintf("--base-path=%s", d.config.BaseDir),
 		"--export-all",
-		"--verbose",
+	}
+
+	if d.config.Debug {
+		args = append(args, "--verbose")
 	}
 
 	if d.config.ListenAddr != "" {
@@ -71,8 +76,15 @@ func (d *GitDaemon) Start(ctx context.Context) error {
 	defer d.mu.Unlock()
 
 	d.cmd = exec.CommandContext(ctx, "git", d.Args()...)
-	d.cmd.Stdout = os.Stdout
-	d.cmd.Stderr = os.Stderr
+
+	// Only show output in debug mode to avoid interfering with TUI
+	if d.config.Debug {
+		d.cmd.Stdout = os.Stdout
+		d.cmd.Stderr = os.Stderr
+	} else {
+		d.cmd.Stdout = io.Discard
+		d.cmd.Stderr = io.Discard
+	}
 
 	if err := d.cmd.Start(); err != nil {
 		return fmt.Errorf("starting git daemon: %w", err)
