@@ -132,6 +132,79 @@ slack_webhook = ""  # Optional: Slack webhook URL
 [web]
 host = "127.0.0.1"
 port = 8080
+
+[prompts]
+# Optional: custom prompts directory
+override_dir = "~/.config/claude-orchestrator/prompts"
+```
+
+### Customizing Agent Prompts
+
+Agent prompts are embedded at compile time but can be overridden for customization. This allows you to modify the instructions given to Claude Code agents without rebuilding.
+
+**Override Precedence** (first match wins):
+1. Project-local: `.claude-orchestrator/prompts/` in your project root
+2. User config: `~/.config/claude-orchestrator/prompts/`
+3. Built-in defaults (embedded in binary)
+
+**Available Prompts:**
+
+| File | Purpose |
+|------|---------|
+| `epic/task.md` | Main prompt for epic task execution |
+| `maintenance/wrapper.md` | Autonomous execution wrapper for maintenance tasks |
+| `maintenance/{refactor,cleanup,optimize,docs,tests,security,lint}.md` | Individual maintenance task templates |
+| `skills/autonomous-plan-execution.md` | Skill definition for autonomous execution |
+
+**To customize a prompt:**
+
+```bash
+# Create override directory
+mkdir -p ~/.config/claude-orchestrator/prompts/epic
+
+# Copy the default template (view at internal/prompts/epic/task.md in source)
+# Or create your own based on the template structure
+
+# Edit the prompt
+cat > ~/.config/claude-orchestrator/prompts/epic/task.md << 'EOF'
+You are implementing: {{.Title}}
+
+Epic file: {{.EpicFilePath}}
+
+{{.EpicContent}}
+{{if .ModuleContext}}
+Module context:
+{{.ModuleContext}}
+{{end}}
+Dependencies completed: {{.CompletedDeps}}
+
+# Your custom instructions here...
+EOF
+```
+
+**Template Variables:**
+
+Epic prompts (`epic/task.md`):
+- `{{.Title}}` - Task title
+- `{{.EpicFilePath}}` - Path to epic file
+- `{{.EpicContent}}` - Full epic markdown content
+- `{{.ModuleContext}}` - Module overview (may be empty)
+- `{{.CompletedDeps}}` - Comma-separated list of completed dependencies
+
+Maintenance prompts (`maintenance/*.md`):
+- `{{.Scope}}` - Scope description (e.g., "the 'api' module")
+- `{{.Module}}` - Module name
+
+Maintenance templates use YAML frontmatter for metadata:
+
+```yaml
+---
+id: refactor
+name: Refactor Code
+description: Improve code structure without changing behavior
+scopes: [module, package, all]
+---
+Your prompt content here with {{.Scope}} placeholder...
 ```
 
 ### Scheduled Batches (Optional)
