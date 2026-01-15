@@ -281,6 +281,11 @@ func getWorkerStatus() (string, error) {
 }
 
 func submitJob(command, verbosity string) (string, error) {
+	// Auto-commit any uncommitted changes before building
+	if err := autoCommitIfNeeded(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: auto-commit failed: %v\n", err)
+	}
+
 	// Get repo info from git
 	repo, commit := getGitInfo()
 
@@ -367,6 +372,37 @@ func getJobLogs(args map[string]interface{}) (string, error) {
 	json.Unmarshal(body, &data)
 	pretty, _ := json.MarshalIndent(data, "", "  ")
 	return string(pretty), nil
+}
+
+// autoCommitIfNeeded checks for uncommitted changes and creates a WIP commit if needed.
+// This ensures the build worker receives the latest code changes.
+func autoCommitIfNeeded() error {
+	// Check for uncommitted changes (staged + unstaged + untracked)
+	cmd := exec.Command("git", "status", "--porcelain")
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("git status failed: %w", err)
+	}
+
+	// No changes to commit
+	if len(strings.TrimSpace(string(out))) == 0 {
+		return nil
+	}
+
+	// Stage all changes
+	cmd = exec.Command("git", "add", "-A")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git add failed: %w", err)
+	}
+
+	// Create WIP commit
+	cmd = exec.Command("git", "commit", "-m", "wip: auto-commit before build")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git commit failed: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "auto-committed uncommitted changes before build\n")
+	return nil
 }
 
 func getGitInfo() (string, string) {
