@@ -27,6 +27,12 @@ func New(dbPath string) (*Store, error) {
 		return nil, err
 	}
 
+	// Set busy timeout to 5 seconds - prevents SQLITE_BUSY errors when multiple
+	// goroutines try to write simultaneously (e.g., agent updates + TUI refresh)
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		return nil, err
+	}
+
 	// Run migrations
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)

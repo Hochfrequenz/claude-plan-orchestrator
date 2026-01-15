@@ -298,9 +298,6 @@ func (a *Agent) Start(ctx context.Context) error {
 	// Add MCP config if available (from project's .mcp.json + orchestrator MCPs)
 	if mcpConfig := a.generateMCPConfig(); mcpConfig != "" {
 		args = append(args, "--mcp-config", mcpConfig)
-		fmt.Printf("[DEBUG] Agent %s MCP config: %s\n", a.TaskID.String(), mcpConfig)
-	} else {
-		fmt.Printf("[DEBUG] Agent %s: no MCP config (no .mcp.json in %s)\n", a.TaskID.String(), a.WorktreePath)
 	}
 
 	// Add prompt
