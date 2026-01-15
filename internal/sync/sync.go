@@ -212,6 +212,21 @@ func (s *Syncer) GitPull() error {
 }
 
 func (s *Syncer) gitPullLocked() error {
+	// Abort any in-progress rebase to avoid "Cannot rebase onto multiple branches" error
+	// This can happen if a previous sync was interrupted
+	rebaseDir := filepath.Join(s.projectRoot, ".git", "rebase-merge")
+	if _, err := os.Stat(rebaseDir); err == nil {
+		abortCmd := exec.Command("git", "rebase", "--abort")
+		abortCmd.Dir = s.projectRoot
+		abortCmd.CombinedOutput() // Ignore errors
+	}
+	rebaseApplyDir := filepath.Join(s.projectRoot, ".git", "rebase-apply")
+	if _, err := os.Stat(rebaseApplyDir); err == nil {
+		abortCmd := exec.Command("git", "rebase", "--abort")
+		abortCmd.Dir = s.projectRoot
+		abortCmd.CombinedOutput() // Ignore errors
+	}
+
 	// Stash any local changes first to avoid rebase conflicts
 	cmd := exec.Command("git", "stash", "--include-untracked")
 	cmd.Dir = s.projectRoot
