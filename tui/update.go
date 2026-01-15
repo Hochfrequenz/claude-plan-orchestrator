@@ -432,7 +432,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.maintenanceModal.Visible = true
 				m.maintenanceModal.Phase = 0
 				m.maintenanceModal.Selected = 0
-				m.maintenanceModal.Templates = maintenance.BuiltinTemplates
+				m.maintenanceModal.Templates = maintenance.BuiltinTemplates()
 				// Set target module from current selection
 				if m.selectedModule < len(m.modules) {
 					m.maintenanceModal.TargetModule = m.modules[m.selectedModule].Name

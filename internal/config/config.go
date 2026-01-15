@@ -15,6 +15,12 @@ type Config struct {
 	Notifications NotificationsConfig `toml:"notifications"`
 	Web           WebConfig           `toml:"web"`
 	BuildPool     BuildPoolConfig     `toml:"build_pool"`
+	Prompts       PromptsConfig       `toml:"prompts"`
+}
+
+// PromptsConfig holds prompt template settings
+type PromptsConfig struct {
+	OverrideDir string `toml:"override_dir"` // Directory for custom prompt overrides
 }
 
 // GeneralConfig holds general settings
@@ -128,6 +134,7 @@ func Load(path string) (*Config, error) {
 	cfg.General.WorktreeDir = ExpandPath(cfg.General.WorktreeDir)
 	cfg.General.DatabasePath = ExpandPath(cfg.General.DatabasePath)
 	cfg.BuildPool.LocalFallback.WorktreeDir = ExpandPath(cfg.BuildPool.LocalFallback.WorktreeDir)
+	cfg.Prompts.OverrideDir = ExpandPath(cfg.Prompts.OverrideDir)
 
 	return cfg, nil
 }

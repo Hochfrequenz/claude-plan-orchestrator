@@ -5,85 +5,44 @@ import (
 	"strings"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/prompts"
 )
 
-const promptTemplate = `You are implementing: %s
+// promptLoader is the loader used for prompt templates.
+// Can be overridden for testing or custom configuration.
+var promptLoader = prompts.GetDefaultLoader()
 
-Epic file: %s
-%s
-Dependencies completed: %s
-
-**REQUIRED SKILL:** Use the autonomous-plan-execution skill for this workflow.
-This skill ensures fully autonomous execution with automatic PR creation and merge.
-
-IMPORTANT: You are running in autonomous mode. Do NOT ask for user input. Complete the entire workflow automatically.
-
-NOTE: The orchestrator automatically manages epic and README status. You do NOT need to update:
-- The epic file's frontmatter status (orchestrator sets it to in_progress/complete)
-- The README.md status emoji (orchestrator updates it automatically)
-
-Instructions:
-1. Implement the epic requirements
-2. Run tests to verify your implementation
-   - Note: The build MCP tools auto-commit uncommitted changes before building
-   - PREFER using the 'test' MCP tool if available (offloads to build pool)
-   - Fallback: cargo test
-3. Ensure all tests pass
-4. Run clippy and fix any warnings
-   - PREFER using the 'clippy' MCP tool if available (offloads to build pool)
-   - Fallback: cargo clippy --all-targets --all-features -- -D warnings
-5. For builds, PREFER using the 'build' MCP tool if available
-6. When complete, add a "## Test Summary" section at the end of the epic file with test results
-7. Commit all changes with a descriptive commit message
-8. Push the branch to remote: git push -u origin HEAD
-9. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
-10. Merge the PR using: gh pr merge --squash --delete-branch
-
-Test Summary format to add to epic file:
-
-## Test Summary
-
-| Metric | Value |
-|--------|-------|
-| Tests | 42 |
-| Passed | 42 |
-| Failed | 0 |
-| Skipped | 0 |
-| Coverage | 85%% |
-
-Files tested:
-- path/to/file1.go
-- path/to/file2.go
-
-Do not ask for clarification. Make reasonable decisions based on the epic content.
-Do not use any skills that ask for user input. Complete all steps automatically.
-Do NOT use finishing-a-development-branch or any skill that requires user interaction.
-`
+// SetPromptLoader allows overriding the prompt loader (for testing or custom config).
+func SetPromptLoader(loader *prompts.Loader) {
+	promptLoader = loader
+}
 
 // BuildPrompt constructs the task prompt for Claude Code
 func BuildPrompt(task *domain.Task, epicContent, moduleOverview string, completedDeps []string) string {
-	var moduleCtx string
-	if moduleOverview != "" {
-		moduleCtx = fmt.Sprintf("\nModule context:\n%s\n", moduleOverview)
-	}
-
 	depsStr := "None"
 	if len(completedDeps) > 0 {
 		depsStr = strings.Join(completedDeps, ", ")
 	}
 
-	epicFileInfo := task.FilePath
-	if epicFileInfo == "" {
-		epicFileInfo = fmt.Sprintf("%s/E%02d", task.ID.Module, task.ID.EpicNum)
+	epicFilePath := task.FilePath
+	if epicFilePath == "" {
+		epicFilePath = fmt.Sprintf("%s/E%02d", task.ID.Module, task.ID.EpicNum)
 	}
-	epicFileInfo = fmt.Sprintf("%s\n\n%s", epicFileInfo, epicContent)
 
-	return fmt.Sprintf(promptTemplate,
-		task.Title,
-		epicFileInfo,
-		moduleCtx,
-		depsStr,
-	)
+	data := prompts.EpicData{
+		Title:         task.Title,
+		EpicFilePath:  epicFilePath,
+		EpicContent:   epicContent,
+		ModuleContext: moduleOverview,
+		CompletedDeps: depsStr,
+	}
+
+	result, err := promptLoader.BuildEpicPrompt(data)
+	if err != nil {
+		// Fallback to a basic prompt if template fails
+		return fmt.Sprintf("Implement: %s\n\nEpic: %s\n\n%s", task.Title, epicFilePath, epicContent)
+	}
+	return result
 }
 
 // BuildCommitMessage creates the commit message format
@@ -111,25 +70,20 @@ func BuildMaintenancePrompt(templatePrompt, scope, targetModule string) string {
 		scopeDesc = scope
 	}
 
+	// Replace placeholders in the template prompt
 	prompt := strings.ReplaceAll(templatePrompt, "{scope}", scopeDesc)
 	prompt = strings.ReplaceAll(prompt, "{module}", targetModule)
 
-	// Add autonomous execution wrapper
-	return fmt.Sprintf(`%s
+	data := prompts.MaintenanceData{
+		Prompt: prompt,
+		Scope:  scopeDesc,
+		Module: targetModule,
+	}
 
-**AUTONOMOUS EXECUTION:** You are running without user interaction. Complete all steps automatically.
-
-Instructions for autonomous execution:
-1. Analyze the code in the specified scope
-2. Make incremental, well-tested changes
-3. Commit changes frequently with clear messages
-4. Run tests after changes to verify nothing broke
-5. If tests fail, fix the issues before continuing
-6. When complete, push the branch and create a PR
-7. Use: gh pr create --title "chore(maintenance): [brief description]" --body "Maintenance task: [details]"
-8. Merge the PR using: gh pr merge --squash --delete-branch
-
-Do not ask for clarification. Make reasonable decisions based on the codebase.
-Do not use any skills that ask for user input.
-`, prompt)
+	result, err := promptLoader.BuildMaintenancePrompt(data)
+	if err != nil {
+		// Fallback to basic prompt if template fails
+		return prompt + "\n\nComplete all steps automatically."
+	}
+	return result
 }
