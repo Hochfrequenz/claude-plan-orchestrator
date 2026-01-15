@@ -87,7 +87,8 @@ type Model struct {
 	selectedModule int
 	selectedAgent      int
 	showAgentDetail    bool
-	agentOutputScroll  int // Scroll position for agent output
+	showAgentPrompt    bool // Toggle to show prompt instead of output
+	agentOutputScroll  int  // Scroll position for agent output
 	showAgentHistory   bool // Toggle to show completed/failed agent history
 	agentHistory       []*AgentView // Historical agent runs from database
 	testRunning        bool
@@ -145,6 +146,7 @@ type AgentView struct {
 	WorktreePath string
 	Error        string
 	Output       []string // Last N lines of output
+	Prompt       string   // The prompt sent to the LLM
 	TokensInput  int
 	TokensOutput int
 	CostUSD      float64

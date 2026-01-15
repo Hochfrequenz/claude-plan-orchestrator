@@ -884,22 +884,88 @@ func (m Model) renderSelectedAgentDetail() string {
 		b.WriteString("\n")
 	}
 
-	// Output section with scrolling
-	if len(agent.Output) > 0 {
+	// Content section with scrolling (either prompt or output)
+	b.WriteString("\n")
+
+	// Calculate visible window
+	maxLines := 20
+	if m.height > 20 {
+		maxLines = m.height - 15 // Leave room for header and footer
+	}
+
+	maxWidth := 80
+	if m.width > 10 {
+		maxWidth = m.width - 10
+	}
+
+	if m.showAgentPrompt {
+		// Show prompt
+		var promptLines []string
+		if agent.Prompt != "" {
+			// Word-wrap the prompt
+			for _, line := range strings.Split(agent.Prompt, "\n") {
+				if len(line) <= maxWidth {
+					promptLines = append(promptLines, line)
+				} else {
+					// Wrap long lines
+					for len(line) > maxWidth {
+						promptLines = append(promptLines, line[:maxWidth])
+						line = line[maxWidth:]
+					}
+					if line != "" {
+						promptLines = append(promptLines, line)
+					}
+				}
+			}
+		} else {
+			promptLines = []string{"(No prompt captured)"}
+		}
+
+		totalLines := len(promptLines)
+		scroll := m.agentOutputScroll
+
+		// Handle -1 as "jump to end"
+		if scroll < 0 || scroll > totalLines-maxLines {
+			scroll = totalLines - maxLines
+			if scroll < 0 {
+				scroll = 0
+			}
+		}
+
+		end := scroll + maxLines
+		if end > totalLines {
+			end = totalLines
+		}
+
+		// Header with scroll position
+		scrollInfo := ""
+		if totalLines > maxLines {
+			scrollInfo = fmt.Sprintf(" [%d-%d of %d]", scroll+1, end, totalLines)
+		}
+		b.WriteString(titleStyle.Render(fmt.Sprintf("  PROMPT%s:", scrollInfo)))
 		b.WriteString("\n")
 
-		// Format the JSON output into readable lines
-		maxWidth := 80
-		if m.width > 10 {
-			maxWidth = m.width - 10
+		// Show scroll indicator at top
+		if scroll > 0 {
+			b.WriteString(queuedStyle.Render("  ↑ (more above)"))
+			b.WriteString("\n")
 		}
-		formattedLines := formatClaudeOutput(agent.Output, maxWidth)
 
-		// Calculate visible window
-		maxLines := 20
-		if m.height > 20 {
-			maxLines = m.height - 15 // Leave room for header and footer
+		// Show visible lines
+		for i := scroll; i < end; i++ {
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  %s", promptLines[i])))
+			b.WriteString("\n")
 		}
+
+		// Show scroll indicator at bottom
+		if end < totalLines {
+			b.WriteString(queuedStyle.Render(fmt.Sprintf("  ↓ (%d more below)", totalLines-end)))
+			b.WriteString("\n")
+		}
+	} else if len(agent.Output) > 0 {
+		// Show output
+		// Format the JSON output into readable lines
+		formattedLines := formatClaudeOutput(agent.Output, maxWidth)
 
 		totalLines := len(formattedLines)
 		scroll := m.agentOutputScroll
@@ -943,13 +1009,16 @@ func (m Model) renderSelectedAgentDetail() string {
 			b.WriteString("\n")
 		}
 	} else if agent.Status == executor.AgentFailed {
-		b.WriteString("\n")
 		b.WriteString(queuedStyle.Render("  No output captured"))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
-	b.WriteString(queuedStyle.Render("  [j/k]scroll [g]top [G]bottom [esc]back"))
+	promptHint := "[p]rompt"
+	if m.showAgentPrompt {
+		promptHint = "[p]output"
+	}
+	b.WriteString(queuedStyle.Render(fmt.Sprintf("  [j/k]scroll [g]top [G]bottom %s [esc]back", promptHint)))
 
 	return strings.TrimSuffix(b.String(), "\n")
 }

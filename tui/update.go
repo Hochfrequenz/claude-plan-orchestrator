@@ -109,9 +109,12 @@ type AgentTestMsg struct {
 
 // MaintenanceStartMsg reports the result of starting a maintenance task
 type MaintenanceStartMsg struct {
-	TaskID  string
-	Success bool
-	Error   string
+	TaskID       string
+	Title        string
+	WorktreePath string
+	Prompt       string
+	Success      bool
+	Error        string
 }
 
 // AgentTestOutputMsg reports streaming output from the agent test
@@ -486,8 +489,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Sync not available (no plans directory or database)"
 			}
 		case "p":
-			// Pause/Resume batch (only on Dashboard tab)
-			if m.activeTab == 0 {
+			// Toggle prompt view in agent detail
+			if m.activeTab == 2 && m.showAgentDetail {
+				m.showAgentPrompt = !m.showAgentPrompt
+				m.agentOutputScroll = 0 // Reset scroll when switching views
+			} else if m.activeTab == 0 {
+				// Pause/Resume batch (only on Dashboard tab)
 				if m.batchRunning && !m.batchPaused {
 					m.batchPaused = true
 					m.statusMsg = "Batch paused"
@@ -935,13 +942,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Success {
 			// Add maintenance agent to the view
 			m.agents = append(m.agents, &AgentView{
-				TaskID: msg.TaskID,
-				Title:  msg.TaskID, // Use task ID as title
-				Status: executor.AgentRunning,
+				TaskID:       msg.TaskID,
+				Title:        msg.Title,
+				WorktreePath: msg.WorktreePath,
+				Prompt:       msg.Prompt,
+				Status:       executor.AgentRunning,
 			})
 			m.activeCount++
 			m.batchRunning = true
-			m.statusMsg = fmt.Sprintf("Started maintenance task: %s", msg.TaskID)
+			m.statusMsg = fmt.Sprintf("Started maintenance task: %s", msg.Title)
 		} else {
 			m.statusMsg = fmt.Sprintf("Maintenance failed: %s", msg.Error)
 		}
@@ -1031,6 +1040,9 @@ func (m *Model) updateAgentsFromManager() {
 		} else {
 			av.Output = output
 		}
+
+		// Capture prompt
+		av.Prompt = agent.Prompt
 
 		// Capture token usage
 		tokensIn, tokensOut, cost := agent.GetUsage()
@@ -1778,19 +1790,20 @@ func (m *Model) startMaintenanceTask() tea.Cmd {
 
 	return func() tea.Msg {
 		// Generate a unique task ID for this maintenance run
-		timestamp := time.Now().Format("20060102-150405")
-		taskID := fmt.Sprintf("maint/%s-%s", template.ID, timestamp)
+		// Use the same TaskID throughout to ensure consistency
+		taskID := domain.TaskID{Module: "maint", EpicNum: int(time.Now().Unix() % 10000)}
+		taskIDStr := taskID.String()
+		title := fmt.Sprintf("%s (%s)", template.Name, scope)
 
 		// Create worktree if manager is available
 		var wtPath string
 		if wtMgr != nil {
-			// Use a pseudo TaskID for worktree creation
-			pseudoID := domain.TaskID{Module: "maint", EpicNum: int(time.Now().Unix() % 10000)}
 			var err error
-			wtPath, err = wtMgr.Create(pseudoID)
+			wtPath, err = wtMgr.Create(taskID)
 			if err != nil {
 				return MaintenanceStartMsg{
-					TaskID:  taskID,
+					TaskID:  taskIDStr,
+					Title:   title,
 					Success: false,
 					Error:   fmt.Sprintf("failed to create worktree: %v", err),
 				}
@@ -1808,7 +1821,7 @@ func (m *Model) startMaintenanceTask() tea.Cmd {
 
 		// Create and start the agent
 		agent := &executor.Agent{
-			TaskID:       domain.TaskID{Module: "maint", EpicNum: int(time.Now().Unix() % 10000)},
+			TaskID:       taskID,
 			WorktreePath: wtPath,
 			Status:       executor.AgentQueued,
 			Prompt:       prompt,
@@ -1825,7 +1838,8 @@ func (m *Model) startMaintenanceTask() tea.Cmd {
 						wtMgr.Remove(wtPath)
 					}
 					return MaintenanceStartMsg{
-						TaskID:  taskID,
+						TaskID:  taskIDStr,
+						Title:   title,
 						Success: false,
 						Error:   fmt.Sprintf("failed to start agent: %v", err),
 					}
@@ -1835,8 +1849,11 @@ func (m *Model) startMaintenanceTask() tea.Cmd {
 		}
 
 		return MaintenanceStartMsg{
-			TaskID:  taskID,
-			Success: true,
+			TaskID:       taskIDStr,
+			Title:        title,
+			WorktreePath: wtPath,
+			Prompt:       prompt,
+			Success:      true,
 		}
 	}
 }
