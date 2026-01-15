@@ -879,7 +879,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case BatchStartMsg:
 		// Batch has been initiated - add agents to view
+		startedTaskIDs := make(map[string]bool)
 		for _, info := range msg.Started {
+			startedTaskIDs[info.TaskID] = true
 			// Find the task to get its title
 			var title string
 			for _, t := range m.queued {
@@ -897,17 +899,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			m.activeCount++
 		}
+		// Update task status in allTasks to in_progress for started tasks
+		for _, t := range m.allTasks {
+			if startedTaskIDs[t.ID.String()] {
+				t.Status = domain.StatusInProgress
+			}
+		}
+		// Recompute module summaries to reflect in-progress tasks
+		m.modules = computeModuleSummaries(m.allTasks)
+
 		// Remove started tasks from queued
 		var remaining []*domain.Task
 		for _, t := range m.queued {
-			started := false
-			for _, info := range msg.Started {
-				if t.ID.String() == info.TaskID {
-					started = true
-					break
-				}
-			}
-			if !started {
+			if !startedTaskIDs[t.ID.String()] {
 				remaining = append(remaining, t)
 			}
 		}
