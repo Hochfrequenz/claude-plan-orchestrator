@@ -501,6 +501,9 @@ func runTUI(cmd *cobra.Command, args []string) error {
 
 	finalModel, err := p.Run()
 
+	// Stop the database write queue to flush pending writes
+	agentMgr.StopDBWriter()
+
 	// Stop build pool coordinator if it was started
 	if buildPoolCoord != nil {
 		buildPoolCoord.Stop()

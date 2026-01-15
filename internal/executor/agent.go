@@ -95,6 +95,20 @@ type AgentRunRecord struct {
 	CostUSD      float64
 }
 
+// dbOp represents a database operation to be executed by the write queue
+type dbOp struct {
+	opType       string
+	agentRunID   string
+	record       *AgentRunRecord
+	status       string
+	errorMessage string
+	tokensInput  int
+	tokensOutput int
+	costUSD      float64
+	taskID       string
+	taskStatus   domain.TaskStatus
+}
+
 // AgentManager manages concurrent agent execution
 type AgentManager struct {
 	maxConcurrent int
@@ -103,13 +117,80 @@ type AgentManager struct {
 	syncer        *isync.Syncer
 	buildPoolURL  string
 	mu            sync.RWMutex
+
+	// Database write queue for serializing DB operations
+	dbWriteChan chan dbOp
+	dbWriteDone chan struct{}
 }
 
 // NewAgentManager creates a new AgentManager
 func NewAgentManager(maxConcurrent int) *AgentManager {
-	return &AgentManager{
+	m := &AgentManager{
 		maxConcurrent: maxConcurrent,
 		agents:        make(map[string]*Agent),
+		dbWriteChan:   make(chan dbOp, 100), // Buffer for async writes
+		dbWriteDone:   make(chan struct{}),
+	}
+	// Start the database write goroutine
+	go m.dbWriter()
+	return m
+}
+
+// dbWriter processes database operations sequentially to avoid lock contention
+func (m *AgentManager) dbWriter() {
+	for op := range m.dbWriteChan {
+		if m.store == nil {
+			continue
+		}
+		switch op.opType {
+		case "save":
+			m.store.SaveAgentRun(op.record)
+		case "delete":
+			m.store.DeleteAgentRun(op.agentRunID)
+		case "updateStatus":
+			m.store.UpdateAgentRunStatus(op.agentRunID, op.status, op.errorMessage)
+		case "updateUsage":
+			m.store.UpdateAgentRunUsage(op.agentRunID, op.tokensInput, op.tokensOutput, op.costUSD)
+		case "updateTaskStatus":
+			if err := m.store.UpdateTaskStatus(op.taskID, op.taskStatus); err != nil {
+				fmt.Printf("Warning: failed to update task status in DB for %s: %v\n", op.taskID, err)
+			}
+		}
+	}
+	close(m.dbWriteDone)
+}
+
+// StopDBWriter stops the database writer goroutine and waits for it to finish
+func (m *AgentManager) StopDBWriter() {
+	if m.dbWriteChan != nil {
+		close(m.dbWriteChan)
+		<-m.dbWriteDone
+	}
+}
+
+// queueDBOp queues a database operation for async execution
+func (m *AgentManager) queueDBOp(op dbOp) {
+	select {
+	case m.dbWriteChan <- op:
+	default:
+		// Channel full, execute synchronously as fallback
+		if m.store == nil {
+			return
+		}
+		switch op.opType {
+		case "save":
+			m.store.SaveAgentRun(op.record)
+		case "delete":
+			m.store.DeleteAgentRun(op.agentRunID)
+		case "updateStatus":
+			m.store.UpdateAgentRunStatus(op.agentRunID, op.status, op.errorMessage)
+		case "updateUsage":
+			m.store.UpdateAgentRunUsage(op.agentRunID, op.tokensInput, op.tokensOutput, op.costUSD)
+		case "updateTaskStatus":
+			if err := m.store.UpdateTaskStatus(op.taskID, op.taskStatus); err != nil {
+				fmt.Printf("Warning: failed to update task status in DB for %s: %v\n", op.taskID, err)
+			}
+		}
 	}
 }
 
@@ -157,21 +238,24 @@ func (m *AgentManager) Add(agent *Agent) {
 	defer m.mu.Unlock()
 	m.agents[agent.TaskID.String()] = agent
 
-	// Persist to database if store is set
-	if m.store != nil && agent.ID != "" {
+	// Persist to database via write queue
+	if agent.ID != "" {
 		startedAt := time.Now()
 		if agent.StartedAt != nil {
 			startedAt = *agent.StartedAt
 		}
-		m.store.SaveAgentRun(&AgentRunRecord{
-			ID:           agent.ID,
-			TaskID:       agent.TaskID.String(),
-			WorktreePath: agent.WorktreePath,
-			LogPath:      agent.LogPath,
-			PID:          agent.PID,
-			Status:       string(agent.Status),
-			StartedAt:    startedAt,
-			SessionID:    agent.SessionID,
+		m.queueDBOp(dbOp{
+			opType: "save",
+			record: &AgentRunRecord{
+				ID:           agent.ID,
+				TaskID:       agent.TaskID.String(),
+				WorktreePath: agent.WorktreePath,
+				LogPath:      agent.LogPath,
+				PID:          agent.PID,
+				Status:       string(agent.Status),
+				StartedAt:    startedAt,
+				SessionID:    agent.SessionID,
+			},
 		})
 	}
 }
@@ -190,9 +274,12 @@ func (m *AgentManager) Remove(taskID string) {
 	agent := m.agents[taskID]
 	delete(m.agents, taskID)
 
-	// Remove from database if store is set
-	if m.store != nil && agent != nil && agent.ID != "" {
-		m.store.DeleteAgentRun(agent.ID)
+	// Remove from database via write queue
+	if agent != nil && agent.ID != "" {
+		m.queueDBOp(dbOp{
+			opType:     "delete",
+			agentRunID: agent.ID,
+		})
 	}
 }
 
@@ -214,9 +301,14 @@ func (m *AgentManager) UpdateAgentStatus(taskID string, status AgentStatus, errM
 	agentID := agent.ID
 	agent.mu.Unlock()
 
-	// Update in database if store is set
-	if m.store != nil && agentID != "" {
-		m.store.UpdateAgentRunStatus(agentID, string(status), errMsg)
+	// Update in database via write queue
+	if agentID != "" {
+		m.queueDBOp(dbOp{
+			opType:       "updateStatus",
+			agentRunID:   agentID,
+			status:       string(status),
+			errorMessage: errMsg,
+		})
 	}
 }
 
@@ -975,7 +1067,12 @@ func (m *AgentManager) RecoverAgents(ctx context.Context) ([]*Agent, error) {
 		taskID, err := domain.ParseTaskID(run.TaskID)
 		if err != nil {
 			// Invalid task ID, mark as failed and skip
-			m.store.UpdateAgentRunStatus(run.ID, "failed", "invalid task ID")
+			m.queueDBOp(dbOp{
+				opType:       "updateStatus",
+				agentRunID:   run.ID,
+				status:       "failed",
+				errorMessage: "invalid task ID",
+			})
 			continue
 		}
 
@@ -1004,8 +1101,13 @@ func (m *AgentManager) RecoverAgents(ctx context.Context) ([]*Agent, error) {
 			agent.FinishedAt = &now
 			// Load output (prefers Claude session file for resumed agents)
 			agent.LoadOutput(100)
-			// Update database
-			m.store.UpdateAgentRunStatus(run.ID, "completed", "")
+			// Update database via write queue
+			m.queueDBOp(dbOp{
+				opType:       "updateStatus",
+				agentRunID:   run.ID,
+				status:       "completed",
+				errorMessage: "",
+			})
 		}
 
 		// Add to manager
@@ -1022,14 +1124,25 @@ func (m *AgentManager) RecoverAgents(ctx context.Context) ([]*Agent, error) {
 // CreateStatusCallback returns a callback that updates the manager's store and syncs status
 func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 	return func(agent *Agent, newStatus AgentStatus, errMsg string) {
-		// Update agent_runs table in database
-		if m.store != nil && agent.ID != "" {
-			m.store.UpdateAgentRunStatus(agent.ID, string(newStatus), errMsg)
+		// Update agent_runs table in database via write queue
+		if agent.ID != "" {
+			m.queueDBOp(dbOp{
+				opType:       "updateStatus",
+				agentRunID:   agent.ID,
+				status:       string(newStatus),
+				errorMessage: errMsg,
+			})
 			// Save token usage when agent completes
 			if newStatus == AgentCompleted || newStatus == AgentFailed {
 				tokensIn, tokensOut, cost := agent.GetUsage()
 				if tokensIn > 0 || tokensOut > 0 {
-					m.store.UpdateAgentRunUsage(agent.ID, tokensIn, tokensOut, cost)
+					m.queueDBOp(dbOp{
+						opType:       "updateUsage",
+						agentRunID:   agent.ID,
+						tokensInput:  tokensIn,
+						tokensOutput: tokensOut,
+						costUSD:      cost,
+					})
 				}
 			}
 		}
@@ -1046,12 +1159,12 @@ func (m *AgentManager) CreateStatusCallback() StatusChangeCallback {
 			return
 		}
 
-		// Update tasks table in database (this was missing - caused sync issues)
-		if m.store != nil {
-			if err := m.store.UpdateTaskStatus(agent.TaskID.String(), taskStatus); err != nil {
-				fmt.Printf("Warning: failed to update task status in DB for %s: %v\n", agent.TaskID.String(), err)
-			}
-		}
+		// Update tasks table in database via write queue
+		m.queueDBOp(dbOp{
+			opType:     "updateTaskStatus",
+			taskID:     agent.TaskID.String(),
+			taskStatus: taskStatus,
+		})
 
 		// Sync epic and README status (atomic operation)
 		if m.syncer != nil && agent.EpicFilePath != "" {
