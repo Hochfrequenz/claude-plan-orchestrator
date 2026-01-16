@@ -1,11 +1,14 @@
 package prbot
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/issues"
 )
 
 const prBodyTemplate = `## Summary
@@ -27,12 +30,16 @@ Autonomous implementation by ERP Orchestrator
 
 // PRBot handles PR creation and management
 type PRBot struct {
-	repoDir string
+	repoDir     string
+	issueCloser *issues.Closer
 }
 
 // NewPRBot creates a new PRBot
-func NewPRBot(repoDir string) *PRBot {
-	return &PRBot{repoDir: repoDir}
+func NewPRBot(repoDir string, issueCloser *issues.Closer) *PRBot {
+	return &PRBot{
+		repoDir:     repoDir,
+		issueCloser: issueCloser,
+	}
 }
 
 // BuildPRBody constructs the PR body
@@ -106,6 +113,17 @@ func (p *PRBot) MergePR(prNumber int) error {
 	cmd.Dir = p.repoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("gh pr merge: %s: %w", out, err)
+	}
+	return nil
+}
+
+// OnMerge handles post-merge actions like closing GitHub issues.
+func (p *PRBot) OnMerge(task *domain.Task, prNumber int) error {
+	if p.issueCloser != nil && task.GitHubIssue != nil {
+		if err := p.issueCloser.CloseIfComplete(context.Background(), task, prNumber); err != nil {
+			// Log but don't fail - PR is already merged
+			log.Printf("warning: failed to close issue: %v", err)
+		}
 	}
 	return nil
 }
