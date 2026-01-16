@@ -101,7 +101,7 @@ func (s *Store) UpsertTask(task *domain.Task) error {
 // GetTask retrieves a task by ID
 func (s *Store) GetTask(id string) (*domain.Task, error) {
 	row := s.db.QueryRow(`
-		SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, created_at, updated_at
+		SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at
 		FROM tasks WHERE id = ?
 	`, id)
 
@@ -116,7 +116,7 @@ type ListOptions struct {
 
 // ListTasks returns tasks matching the given options
 func (s *Store) ListTasks(opts ListOptions) ([]*domain.Task, error) {
-	query := `SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, created_at, updated_at FROM tasks WHERE 1=1`
+	query := `SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at FROM tasks WHERE 1=1`
 	var args []interface{}
 
 	if opts.Module != "" {
@@ -180,8 +180,9 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 	var epicNum int
 	var status, priority, depsJSON string
 	var description sql.NullString
+	var githubIssue sql.NullInt64
 
-	err := row.Scan(&id, &module, &epicNum, &task.Title, &description, &status, &priority, &depsJSON, &task.NeedsReview, &task.FilePath, &task.CreatedAt, &task.UpdatedAt)
+	err := row.Scan(&id, &module, &epicNum, &task.Title, &description, &status, &priority, &depsJSON, &task.NeedsReview, &task.FilePath, &githubIssue, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +192,10 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 	task.Priority = domain.Priority(priority)
 	if description.Valid {
 		task.Description = description.String
+	}
+	if githubIssue.Valid {
+		gi := int(githubIssue.Int64)
+		task.GitHubIssue = &gi
 	}
 
 	if depsJSON != "" && depsJSON != "null" {
@@ -210,8 +215,9 @@ func scanTaskRows(rows *sql.Rows) (*domain.Task, error) {
 	var epicNum int
 	var status, priority, depsJSON string
 	var description sql.NullString
+	var githubIssue sql.NullInt64
 
-	err := rows.Scan(&id, &module, &epicNum, &task.Title, &description, &status, &priority, &depsJSON, &task.NeedsReview, &task.FilePath, &task.CreatedAt, &task.UpdatedAt)
+	err := rows.Scan(&id, &module, &epicNum, &task.Title, &description, &status, &priority, &depsJSON, &task.NeedsReview, &task.FilePath, &githubIssue, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +227,10 @@ func scanTaskRows(rows *sql.Rows) (*domain.Task, error) {
 	task.Priority = domain.Priority(priority)
 	if description.Valid {
 		task.Description = description.String
+	}
+	if githubIssue.Valid {
+		gi := int(githubIssue.Int64)
+		task.GitHubIssue = &gi
 	}
 
 	if depsJSON != "" && depsJSON != "null" {
@@ -505,6 +515,27 @@ func (s *Store) UpsertGitHubIssue(issue *domain.GitHubIssue) error {
 	return err
 }
 
+// scanGitHubIssue populates a GitHubIssue from nullable scan values
+func scanGitHubIssue(issue *domain.GitHubIssue, status string, groupName sql.NullString, analyzedAt sql.NullTime, planPath sql.NullString, closedAt sql.NullTime, prNumber sql.NullInt64) {
+	issue.Status = domain.IssueStatus(status)
+	if groupName.Valid {
+		issue.GroupName = groupName.String
+	}
+	if analyzedAt.Valid {
+		issue.AnalyzedAt = &analyzedAt.Time
+	}
+	if planPath.Valid {
+		issue.PlanPath = planPath.String
+	}
+	if closedAt.Valid {
+		issue.ClosedAt = &closedAt.Time
+	}
+	if prNumber.Valid {
+		pn := int(prNumber.Int64)
+		issue.PRNumber = &pn
+	}
+}
+
 // GetGitHubIssue retrieves a GitHub issue by its issue number
 func (s *Store) GetGitHubIssue(issueNumber int) (*domain.GitHubIssue, error) {
 	row := s.db.QueryRow(`
@@ -525,23 +556,7 @@ func (s *Store) GetGitHubIssue(issueNumber int) (*domain.GitHubIssue, error) {
 	if err != nil {
 		return nil, err
 	}
-	issue.Status = domain.IssueStatus(status)
-	if groupName.Valid {
-		issue.GroupName = groupName.String
-	}
-	if analyzedAt.Valid {
-		issue.AnalyzedAt = &analyzedAt.Time
-	}
-	if planPath.Valid {
-		issue.PlanPath = planPath.String
-	}
-	if closedAt.Valid {
-		issue.ClosedAt = &closedAt.Time
-	}
-	if prNumber.Valid {
-		pn := int(prNumber.Int64)
-		issue.PRNumber = &pn
-	}
+	scanGitHubIssue(&issue, status, groupName, analyzedAt, planPath, closedAt, prNumber)
 	return &issue, nil
 }
 
@@ -570,23 +585,7 @@ func (s *Store) ListPendingIssues(repo string) ([]*domain.GitHubIssue, error) {
 			&analyzedAt, &planPath, &closedAt, &prNumber, &issue.CreatedAt, &issue.UpdatedAt); err != nil {
 			return nil, err
 		}
-		issue.Status = domain.IssueStatus(status)
-		if groupName.Valid {
-			issue.GroupName = groupName.String
-		}
-		if analyzedAt.Valid {
-			issue.AnalyzedAt = &analyzedAt.Time
-		}
-		if planPath.Valid {
-			issue.PlanPath = planPath.String
-		}
-		if closedAt.Valid {
-			issue.ClosedAt = &closedAt.Time
-		}
-		if prNumber.Valid {
-			pn := int(prNumber.Int64)
-			issue.PRNumber = &pn
-		}
+		scanGitHubIssue(&issue, status, groupName, analyzedAt, planPath, closedAt, prNumber)
 		issues = append(issues, &issue)
 	}
 	return issues, rows.Err()
@@ -610,7 +609,7 @@ func (s *Store) MarkIssueClosed(issueNumber int, prNumber int) error {
 // GetIncompleteEpicsForIssue returns all tasks linked to a GitHub issue that are not complete
 func (s *Store) GetIncompleteEpicsForIssue(issueNumber int) ([]*domain.Task, error) {
 	rows, err := s.db.Query(`
-		SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, created_at, updated_at
+		SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at
 		FROM tasks WHERE github_issue = ? AND status != ?
 	`, issueNumber, string(domain.StatusComplete))
 	if err != nil {
