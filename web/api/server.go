@@ -59,6 +59,14 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/agents", s.listAgentsHandler())
 	s.mux.HandleFunc("/api/events", s.sseHandler())
 
+	// Batch control routes
+	s.mux.HandleFunc("/api/batch/status", s.batchStatusHandler())
+	s.mux.HandleFunc("/api/batch/start", s.batchStartHandler())
+	s.mux.HandleFunc("/api/batch/stop", s.batchStopHandler())
+	s.mux.HandleFunc("/api/batch/pause", s.batchPauseHandler())
+	s.mux.HandleFunc("/api/batch/resume", s.batchResumeHandler())
+	s.mux.HandleFunc("/api/batch/auto", s.batchAutoHandler())
+
 	// Static files (embedded Svelte build output)
 	buildFS, _ := fs.Sub(ui.BuildFS, "build")
 	s.mux.Handle("/", http.FileServer(http.FS(buildFS)))

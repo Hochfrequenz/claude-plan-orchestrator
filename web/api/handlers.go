@@ -36,6 +36,13 @@ type AgentResponse struct {
 	Duration string `json:"duration"`
 }
 
+// BatchStatusResponse is the API response for batch status
+type BatchStatusResponse struct {
+	Running bool `json:"running"`
+	Paused  bool `json:"paused"`
+	Auto    bool `json:"auto"`
+}
+
 func taskToResponse(t *domain.Task) TaskResponse {
 	deps := make([]string, len(t.DependsOn))
 	for i, d := range t.DependsOn {
@@ -149,5 +156,132 @@ func (s *Server) listAgentsHandler() http.HandlerFunc {
 
 		// Would return agent status from AgentManager
 		writeJSON(w, []AgentResponse{})
+	}
+}
+
+func (s *Server) batchStatusHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		s.batchMu.RLock()
+		resp := BatchStatusResponse{
+			Running: s.batchRunning,
+			Paused:  s.batchPaused,
+			Auto:    s.autoMode,
+		}
+		s.batchMu.RUnlock()
+
+		writeJSON(w, resp)
+	}
+}
+
+func (s *Server) batchStartHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		s.batchMu.Lock()
+		s.batchRunning = true
+		s.batchPaused = false
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+			Running: true,
+			Paused:  false,
+			Auto:    s.autoMode,
+		}})
+
+		writeJSON(w, map[string]string{"status": "started"})
+	}
+}
+
+func (s *Server) batchStopHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		s.batchMu.Lock()
+		s.batchRunning = false
+		s.batchPaused = false
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+			Running: false,
+			Paused:  false,
+			Auto:    s.autoMode,
+		}})
+
+		writeJSON(w, map[string]string{"status": "stopped"})
+	}
+}
+
+func (s *Server) batchPauseHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		s.batchMu.Lock()
+		s.batchPaused = true
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+			Running: s.batchRunning,
+			Paused:  true,
+			Auto:    s.autoMode,
+		}})
+
+		writeJSON(w, map[string]string{"status": "paused"})
+	}
+}
+
+func (s *Server) batchResumeHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		s.batchMu.Lock()
+		s.batchPaused = false
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+			Running: s.batchRunning,
+			Paused:  false,
+			Auto:    s.autoMode,
+		}})
+
+		writeJSON(w, map[string]string{"status": "resumed"})
+	}
+}
+
+func (s *Server) batchAutoHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		s.batchMu.Lock()
+		s.autoMode = !s.autoMode
+		autoMode := s.autoMode
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+			Running: s.batchRunning,
+			Paused:  s.batchPaused,
+			Auto:    autoMode,
+		}})
+
+		writeJSON(w, map[string]bool{"auto": autoMode})
 	}
 }
