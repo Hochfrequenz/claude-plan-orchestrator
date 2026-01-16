@@ -137,3 +137,34 @@ func TestGroupPrioritiesTableExists(t *testing.T) {
 		t.Errorf("group_priorities table does not exist: %v", err)
 	}
 }
+
+func TestGetGroupPriorities(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Insert some test data
+	store.db.Exec("INSERT INTO group_priorities (group_name, priority) VALUES ('auth', 0)")
+	store.db.Exec("INSERT INTO group_priorities (group_name, priority) VALUES ('billing', 1)")
+	store.db.Exec("INSERT INTO group_priorities (group_name, priority) VALUES ('analytics', 2)")
+
+	priorities, err := store.GetGroupPriorities()
+	if err != nil {
+		t.Fatalf("GetGroupPriorities() error = %v", err)
+	}
+
+	if len(priorities) != 3 {
+		t.Errorf("len(priorities) = %d, want 3", len(priorities))
+	}
+	if priorities["auth"] != 0 {
+		t.Errorf("priorities[auth] = %d, want 0", priorities["auth"])
+	}
+	if priorities["billing"] != 1 {
+		t.Errorf("priorities[billing] = %d, want 1", priorities["billing"])
+	}
+	if priorities["analytics"] != 2 {
+		t.Errorf("priorities[analytics] = %d, want 2", priorities["analytics"])
+	}
+}

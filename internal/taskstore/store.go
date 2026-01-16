@@ -352,6 +352,26 @@ func (s *Store) UpdateAgentRunUsage(id string, tokensInput, tokensOutput int, co
 	return err
 }
 
+// GetGroupPriorities returns all group priorities as a map
+func (s *Store) GetGroupPriorities() (map[string]int, error) {
+	rows, err := s.db.Query("SELECT group_name, priority FROM group_priorities")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	priorities := make(map[string]int)
+	for rows.Next() {
+		var name string
+		var priority int
+		if err := rows.Scan(&name, &priority); err != nil {
+			return nil, err
+		}
+		priorities[name] = priority
+	}
+	return priorities, rows.Err()
+}
+
 // ListRecentAgentRuns returns completed/failed agent runs, in chronological order (oldest first)
 func (s *Store) ListRecentAgentRuns(limit int) ([]*AgentRun, error) {
 	// Get the N most recent runs, then reverse to show in chronological order
