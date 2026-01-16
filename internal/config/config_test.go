@@ -262,3 +262,37 @@ func TestConfig_GitHubIssuesDefaults(t *testing.T) {
 		t.Error("PriorityLabels should not be nil")
 	}
 }
+
+func TestConfig_ValidateGitHubIssues(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     GitHubIssuesConfig
+		wantErr bool
+	}{
+		{
+			name:    "disabled is valid",
+			cfg:     GitHubIssuesConfig{Enabled: false},
+			wantErr: false,
+		},
+		{
+			name:    "enabled without repo is invalid",
+			cfg:     GitHubIssuesConfig{Enabled: true, Repo: ""},
+			wantErr: true,
+		},
+		{
+			name:    "enabled with repo is valid",
+			cfg:     GitHubIssuesConfig{Enabled: true, Repo: "owner/repo"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{GitHubIssues: tt.cfg}
+			err := cfg.ValidateGitHubIssues()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateGitHubIssues() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

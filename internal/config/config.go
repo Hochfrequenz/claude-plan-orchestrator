@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -237,4 +238,15 @@ func (c *Config) Save(path string) error {
 	}
 
 	return os.WriteFile(path, data, 0644)
+}
+
+// ValidateGitHubIssues validates the GitHub issues configuration
+func (c *Config) ValidateGitHubIssues() error {
+	if !c.GitHubIssues.Enabled {
+		return nil
+	}
+	if c.GitHubIssues.Repo == "" {
+		return fmt.Errorf("github_issues.repo is required when enabled")
+	}
+	return nil
 }
