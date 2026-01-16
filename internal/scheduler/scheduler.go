@@ -56,6 +56,12 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 		inProgress = make(map[string]bool)
 	}
 
+	// Determine active priority tier (only if priorities are configured)
+	activeTier := 0
+	if len(s.groupPriorities) > 0 {
+		activeTier = s.getActivePriorityTier()
+	}
+
 	// Combine completed and in-progress for dependency checking
 	unavailable := make(map[string]bool)
 	for id := range s.completed {
@@ -65,6 +71,14 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 	var ready []*domain.Task
 
 	for _, task := range s.tasks {
+		// Skip tasks not in active tier (if priorities are configured)
+		if len(s.groupPriorities) > 0 {
+			taskTier := s.groupPriorities[task.ID.Module] // Defaults to 0 if not found
+			if taskTier > activeTier {
+				continue
+			}
+		}
+
 		if task.IsReady(s.completed) && !s.dependsOnAny(task, inProgress) {
 			ready = append(ready, task)
 		}
