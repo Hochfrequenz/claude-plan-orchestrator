@@ -104,13 +104,18 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 		}
 
 		// 4. Epic number (earlier epics first within same module)
-		return ready[i].ID.EpicNum < ready[j].ID.EpicNum
+		if ready[i].ID.EpicNum != ready[j].ID.EpicNum {
+			return ready[i].ID.EpicNum < ready[j].ID.EpicNum
+		}
+
+		// 5. Prefix (alphabetical, for consistent ordering of CLI vs TUI etc.)
+		return ready[i].ID.Prefix < ready[j].ID.Prefix
 	})
 
 	// Select tasks ensuring no conflicts between selected tasks
 	var selected []*domain.Task
 	selectedIDs := make(map[string]bool)
-	selectedModules := make(map[string]int) // track highest epic per module
+	selectedSequences := make(map[string]int) // track highest epic per sequence (module+prefix)
 
 	for _, task := range ready {
 		if len(selected) >= limit {
@@ -118,15 +123,16 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 		}
 
 		// Check if this task conflicts with already selected tasks
-		if s.conflictsWithSelected(task, selectedIDs, selectedModules) {
+		if s.conflictsWithSelected(task, selectedIDs, selectedSequences) {
 			continue
 		}
 
 		selected = append(selected, task)
 		selectedIDs[task.ID.String()] = true
-		// Track highest epic number selected per module
-		if task.ID.EpicNum > selectedModules[task.ID.Module] {
-			selectedModules[task.ID.Module] = task.ID.EpicNum
+		// Track highest epic number selected per sequence (module+prefix)
+		seqKey := task.ID.Module + "/" + task.ID.Prefix
+		if task.ID.EpicNum > selectedSequences[seqKey] {
+			selectedSequences[seqKey] = task.ID.EpicNum
 		}
 	}
 
@@ -144,7 +150,7 @@ func (s *Scheduler) dependsOnAny(task *domain.Task, taskIDs map[string]bool) boo
 }
 
 // conflictsWithSelected checks if selecting this task would conflict with already selected tasks
-func (s *Scheduler) conflictsWithSelected(task *domain.Task, selectedIDs map[string]bool, selectedModules map[string]int) bool {
+func (s *Scheduler) conflictsWithSelected(task *domain.Task, selectedIDs map[string]bool, selectedSequences map[string]int) bool {
 	// Check explicit dependencies - task can't depend on a selected task
 	for _, dep := range task.DependsOn {
 		if selectedIDs[dep.String()] {
@@ -164,21 +170,19 @@ func (s *Scheduler) conflictsWithSelected(task *domain.Task, selectedIDs map[str
 		}
 	}
 
-	// Check implicit sequential dependency within same module
-	// If we already selected an epic from this module, only allow if this is
-	// from a different "branch" (no implicit sequential dependency)
-	if highestEpic, exists := selectedModules[task.ID.Module]; exists {
-		// Within same module, epics are typically sequential
-		// Don't run E02 if E01 is already selected (implicit dependency)
-		// But E05 and E01 might be independent if E05 doesn't depend on E01-E04
+	// Check implicit sequential dependency within same sequence (module+prefix)
+	// Tasks with different prefixes (e.g., CLI vs TUI) are independent sequences
+	seqKey := task.ID.Module + "/" + task.ID.Prefix
+	if highestEpic, exists := selectedSequences[seqKey]; exists {
+		// Within same sequence, epics are sequential
+		// Don't run CLI03 if CLI02 is already selected (implicit dependency)
+		// But CLI02 and TUI02 are independent (different sequences)
 
-		// Check if this task has implicit dependency on any selected task in same module
-		// by checking if there's any epic between this and the highest selected
+		// Check if this task has implicit dependency on any selected task in same sequence
 		if task.ID.EpicNum > highestEpic {
-			// This task comes after already selected tasks in same module
-			// Check if it explicitly depends on earlier ones or has implicit dep
+			// This task comes after already selected tasks in same sequence
 			for epic := highestEpic; epic < task.ID.EpicNum; epic++ {
-				implicitDep := domain.TaskID{Module: task.ID.Module, EpicNum: epic}
+				implicitDep := domain.TaskID{Module: task.ID.Module, Prefix: task.ID.Prefix, EpicNum: epic}
 				// If the implicit dependency isn't completed, we shouldn't run this in parallel
 				if !s.completed[implicitDep.String()] && selectedIDs[implicitDep.String()] {
 					return true
@@ -187,12 +191,12 @@ func (s *Scheduler) conflictsWithSelected(task *domain.Task, selectedIDs map[str
 		} else if task.ID.EpicNum < highestEpic {
 			// A later epic was already selected, check if it depends on this one
 			for epic := task.ID.EpicNum + 1; epic <= highestEpic; epic++ {
-				implicitDep := domain.TaskID{Module: task.ID.Module, EpicNum: epic}
+				implicitDep := domain.TaskID{Module: task.ID.Module, Prefix: task.ID.Prefix, EpicNum: epic}
 				if selectedIDs[implicitDep.String()] {
 					// Check if that selected task might depend on this one
 					selTask := s.taskMap[implicitDep.String()]
 					if selTask != nil && !s.completed[task.ID.String()] {
-						// If they're in same module and sequential, assume dependency
+						// If they're in same sequence and sequential, assume dependency
 						return true
 					}
 				}
