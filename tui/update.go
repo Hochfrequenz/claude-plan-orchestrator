@@ -141,6 +141,12 @@ type SyncResolveMsg struct {
 	Err error
 }
 
+// GroupPrioritiesMsg contains loaded group priority data
+type GroupPrioritiesMsg struct {
+	Items []GroupPriorityItem
+	Error error
+}
+
 // Update handles messages
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -338,9 +344,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "g":
-			// Jump to top of agent output
+			// On Agents tab with detail view: jump to top of output
 			if m.activeTab == 2 && (m.showAgentDetail || m.showHistoryDetail) {
 				m.agentOutputScroll = 0
+			} else if m.showGroupPriorities {
+				// Close group priorities view
+				m.showGroupPriorities = false
+			} else if m.activeTab == 0 || m.activeTab == 3 {
+				// Toggle group priorities view (only on Dashboard or Modules tab)
+				m.showGroupPriorities = true
+				m.selectedPriorityRow = 0
+				// Load group priority data
+				return m, loadGroupPrioritiesCmd(m.store)
 			}
 		case "G":
 			// Jump to bottom of agent output (handled in view by setting to max)
@@ -1003,6 +1018,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Started maintenance task: %s", msg.Title)
 		} else {
 			m.statusMsg = fmt.Sprintf("Maintenance failed: %s", msg.Error)
+		}
+		return m, nil
+
+	case GroupPrioritiesMsg:
+		if msg.Error != nil {
+			m.statusMsg = fmt.Sprintf("Failed to load priorities: %v", msg.Error)
+			m.showGroupPriorities = false
+		} else {
+			m.groupPriorityItems = msg.Items
 		}
 		return m, nil
 	}
@@ -1930,5 +1954,31 @@ func (m *Model) startMaintenanceTask() tea.Cmd {
 			Prompt:       prompt,
 			Success:      true,
 		}
+	}
+}
+
+// loadGroupPrioritiesCmd loads group priority data from the store
+func loadGroupPrioritiesCmd(store *taskstore.Store) tea.Cmd {
+	return func() tea.Msg {
+		if store == nil {
+			return GroupPrioritiesMsg{Error: fmt.Errorf("no database configured")}
+		}
+
+		stats, err := store.GetGroupsWithTaskCounts()
+		if err != nil {
+			return GroupPrioritiesMsg{Error: err}
+		}
+
+		items := make([]GroupPriorityItem, len(stats))
+		for i, s := range stats {
+			items[i] = GroupPriorityItem{
+				Name:      s.Name,
+				Priority:  s.Priority,
+				Total:     s.Total,
+				Completed: s.Completed,
+			}
+		}
+
+		return GroupPrioritiesMsg{Items: items}
 	}
 }

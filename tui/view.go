@@ -95,46 +95,53 @@ func (m Model) View() string {
 	b.WriteString(m.renderTabs())
 	b.WriteString("\n")
 
-	// Content based on active tab
-	switch m.activeTab {
-	case 0: // Dashboard
-		runningSection := m.renderRunning()
-		b.WriteString(sectionStyle.Width(m.width - 2).Render(runningSection))
+	// If group priorities view is active, render it instead of normal content
+	if m.showGroupPriorities {
+		prioritiesSection := m.renderGroupPriorities()
+		b.WriteString(sectionStyle.Width(m.width - 2).Render(prioritiesSection))
 		b.WriteString("\n")
+	} else {
+		// Content based on active tab
+		switch m.activeTab {
+		case 0: // Dashboard
+			runningSection := m.renderRunning()
+			b.WriteString(sectionStyle.Width(m.width - 2).Render(runningSection))
+			b.WriteString("\n")
 
-		workersSection := m.renderWorkers()
-		b.WriteString(sectionStyle.Width(m.width - 2).Render(workersSection))
-		b.WriteString("\n")
+			workersSection := m.renderWorkers()
+			b.WriteString(sectionStyle.Width(m.width - 2).Render(workersSection))
+			b.WriteString("\n")
 
-		queuedSection := m.renderQueued()
-		b.WriteString(sectionStyle.Width(m.width - 2).Render(queuedSection))
-		b.WriteString("\n")
+			queuedSection := m.renderQueued()
+			b.WriteString(sectionStyle.Width(m.width - 2).Render(queuedSection))
+			b.WriteString("\n")
 
-		if len(m.flagged) > 0 {
-			attentionSection := m.renderAttention()
-			b.WriteString(sectionStyle.Width(m.width - 2).Render(attentionSection))
+			if len(m.flagged) > 0 {
+				attentionSection := m.renderAttention()
+				b.WriteString(sectionStyle.Width(m.width - 2).Render(attentionSection))
+				b.WriteString("\n")
+			}
+
+		case 1: // Tasks
+			tasksSection := m.renderTasks()
+			b.WriteString(sectionStyle.Width(m.width - 2).Render(tasksSection))
+			b.WriteString("\n")
+
+		case 2: // Agents
+			agentsSection := m.renderAgentsDetail()
+			b.WriteString(sectionStyle.Width(m.width - 2).Render(agentsSection))
+			b.WriteString("\n")
+
+		case 3: // Modules
+			modulesSection := m.renderModules()
+			b.WriteString(sectionStyle.Width(m.width - 2).Render(modulesSection))
+			b.WriteString("\n")
+
+		case 4: // PRs
+			prsSection := m.renderPRs()
+			b.WriteString(sectionStyle.Width(m.width - 2).Render(prsSection))
 			b.WriteString("\n")
 		}
-
-	case 1: // Tasks
-		tasksSection := m.renderTasks()
-		b.WriteString(sectionStyle.Width(m.width - 2).Render(tasksSection))
-		b.WriteString("\n")
-
-	case 2: // Agents
-		agentsSection := m.renderAgentsDetail()
-		b.WriteString(sectionStyle.Width(m.width - 2).Render(agentsSection))
-		b.WriteString("\n")
-
-	case 3: // Modules
-		modulesSection := m.renderModules()
-		b.WriteString(sectionStyle.Width(m.width - 2).Render(modulesSection))
-		b.WriteString("\n")
-
-	case 4: // PRs
-		prsSection := m.renderPRs()
-		b.WriteString(sectionStyle.Width(m.width - 2).Render(prsSection))
-		b.WriteString("\n")
 	}
 
 	// Status message (if any)
