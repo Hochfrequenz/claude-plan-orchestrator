@@ -461,14 +461,47 @@ func (m Model) renderQueued() string {
 		shown++
 	}
 
-	// Then show blocked tasks if we have room
+	// Then show blocked tasks if we have room (only from active tier)
 	if shown < limit {
+		// Determine active tier for filtering blocked tasks
+		activeTier := 0
+		if len(groupPriorities) > 0 {
+			// Find the lowest tier that has incomplete tasks
+			tierHasIncomplete := make(map[int]bool)
+			for _, task := range m.queued {
+				if !m.completedTasks[task.ID.String()] {
+					tier := groupPriorities[task.ID.Module] // Defaults to 0
+					tierHasIncomplete[tier] = true
+				}
+			}
+			// Find max tier to bound the search
+			maxTier := 0
+			for tier := range tierHasIncomplete {
+				if tier > maxTier {
+					maxTier = tier
+				}
+			}
+			for tier := 0; tier <= maxTier; tier++ {
+				if tierHasIncomplete[tier] {
+					activeTier = tier
+					break
+				}
+			}
+		}
+
 		for _, task := range m.queued {
 			if shown >= limit {
 				break
 			}
 			if readySet[task.ID.String()] {
 				continue // Already shown above
+			}
+			// Skip tasks not in active tier
+			if len(groupPriorities) > 0 {
+				taskTier := groupPriorities[task.ID.Module]
+				if taskTier > activeTier {
+					continue
+				}
 			}
 			// Find what's blocking this task
 			blocking := ""
