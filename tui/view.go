@@ -204,7 +204,7 @@ func (m Model) View() string {
 			statusBar = fmt.Sprintf(" [tab]switch [+/-]max agents %s [q]uit ", mouseHint)
 		}
 	case 3: // Modules
-		statusBar = fmt.Sprintf(" [tab]switch [j/k]scroll [m]aint [s]sync [x]run tests %s [q]uit ", mouseHint)
+		statusBar = fmt.Sprintf(" [tab]switch [j/k]scroll [g]roups [m]aint [s]sync [x]run tests %s [q]uit ", mouseHint)
 	default:
 		testHint := ""
 		if m.buildPoolStatus == "connected" {
@@ -215,11 +215,11 @@ func (m Model) View() string {
 			autoHint = "[a]uto:ON"
 		}
 		if m.batchRunning && !m.batchPaused {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[p]ause %s %s [q]uit ", testHint, autoHint, mouseHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules [g]roups %s[p]ause %s %s [q]uit ", testHint, autoHint, mouseHint)
 		} else if m.batchRunning && m.batchPaused {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[p]resume %s %s [q]uit ", testHint, autoHint, mouseHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules [g]roups %s[p]resume %s %s [q]uit ", testHint, autoHint, mouseHint)
 		} else {
-			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules %s[s]tart [a]uto %s [q]uit ", testHint, mouseHint)
+			statusBar = fmt.Sprintf(" [tab]switch [t]asks [m]odules [g]roups %s[s]tart [a]uto %s [q]uit ", testHint, mouseHint)
 		}
 	}
 	b.WriteString(statusBarStyle.Width(m.width).Render(statusBar))
