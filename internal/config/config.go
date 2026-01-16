@@ -16,6 +16,19 @@ type Config struct {
 	Web           WebConfig           `toml:"web"`
 	BuildPool     BuildPoolConfig     `toml:"build_pool"`
 	Prompts       PromptsConfig       `toml:"prompts"`
+	GitHubIssues  GitHubIssuesConfig  `toml:"github_issues"`
+}
+
+// GitHubIssuesConfig holds GitHub issues integration settings
+type GitHubIssuesConfig struct {
+	Enabled          bool              `toml:"enabled"`
+	Repo             string            `toml:"repo"`
+	CandidateLabel   string            `toml:"candidate_label"`
+	ReadyLabel       string            `toml:"ready_label"`
+	RefinementLabel  string            `toml:"refinement_label"`
+	ImplementedLabel string            `toml:"implemented_label"`
+	AreaLabelPrefix  string            `toml:"area_label_prefix"`
+	PriorityLabels   map[string]string `toml:"priority_labels"`
 }
 
 // PromptsConfig holds prompt template settings
@@ -109,6 +122,15 @@ func Default() *Config {
 				HeartbeatIntervalSecs: 30,
 				HeartbeatTimeoutSecs:  90, // Allow missing 2 heartbeats before disconnect
 			},
+		},
+		GitHubIssues: GitHubIssuesConfig{
+			Enabled:          false,
+			CandidateLabel:   "orchestrator-candidate",
+			ReadyLabel:       "implementation-ready",
+			RefinementLabel:  "needs-refinement",
+			ImplementedLabel: "implemented",
+			AreaLabelPrefix:  "area:",
+			PriorityLabels:   map[string]string{},
 		},
 	}
 }

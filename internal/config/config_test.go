@@ -180,3 +180,85 @@ project_root = "/from-local"
 		t.Errorf("ProjectRoot = %q, want /from-local", cfg.General.ProjectRoot)
 	}
 }
+
+func writeTempConfig(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestConfig_GitHubIssues(t *testing.T) {
+	tomlContent := `
+[general]
+project_root = "/tmp/test"
+
+[github_issues]
+enabled = true
+repo = "owner/repo"
+candidate_label = "orchestrator-candidate"
+ready_label = "implementation-ready"
+refinement_label = "needs-refinement"
+implemented_label = "implemented"
+area_label_prefix = "area:"
+
+[github_issues.priority_labels]
+high = "priority:high"
+medium = "priority:medium"
+low = "priority:low"
+`
+	tmpFile := writeTempConfig(t, tomlContent)
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.GitHubIssues.Enabled {
+		t.Error("expected GitHubIssues.Enabled = true")
+	}
+	if cfg.GitHubIssues.Repo != "owner/repo" {
+		t.Errorf("Repo = %v, want owner/repo", cfg.GitHubIssues.Repo)
+	}
+	if cfg.GitHubIssues.CandidateLabel != "orchestrator-candidate" {
+		t.Errorf("CandidateLabel = %v, want orchestrator-candidate", cfg.GitHubIssues.CandidateLabel)
+	}
+	if cfg.GitHubIssues.AreaLabelPrefix != "area:" {
+		t.Errorf("AreaLabelPrefix = %v, want area:", cfg.GitHubIssues.AreaLabelPrefix)
+	}
+	// Verify priority labels were loaded
+	if len(cfg.GitHubIssues.PriorityLabels) != 3 {
+		t.Errorf("PriorityLabels length = %d, want 3", len(cfg.GitHubIssues.PriorityLabels))
+	}
+	if cfg.GitHubIssues.PriorityLabels["high"] != "priority:high" {
+		t.Errorf("PriorityLabels[high] = %v, want priority:high", cfg.GitHubIssues.PriorityLabels["high"])
+	}
+}
+
+func TestConfig_GitHubIssuesDefaults(t *testing.T) {
+	cfg := Default()
+
+	if cfg.GitHubIssues.Enabled {
+		t.Error("expected GitHubIssues.Enabled = false by default")
+	}
+	if cfg.GitHubIssues.CandidateLabel != "orchestrator-candidate" {
+		t.Errorf("CandidateLabel = %v, want orchestrator-candidate", cfg.GitHubIssues.CandidateLabel)
+	}
+	if cfg.GitHubIssues.ReadyLabel != "implementation-ready" {
+		t.Errorf("ReadyLabel = %v, want implementation-ready", cfg.GitHubIssues.ReadyLabel)
+	}
+	if cfg.GitHubIssues.RefinementLabel != "needs-refinement" {
+		t.Errorf("RefinementLabel = %v, want needs-refinement", cfg.GitHubIssues.RefinementLabel)
+	}
+	if cfg.GitHubIssues.ImplementedLabel != "implemented" {
+		t.Errorf("ImplementedLabel = %v, want implemented", cfg.GitHubIssues.ImplementedLabel)
+	}
+	if cfg.GitHubIssues.AreaLabelPrefix != "area:" {
+		t.Errorf("AreaLabelPrefix = %v, want area:", cfg.GitHubIssues.AreaLabelPrefix)
+	}
+	if cfg.GitHubIssues.PriorityLabels == nil {
+		t.Error("PriorityLabels should not be nil")
+	}
+}
