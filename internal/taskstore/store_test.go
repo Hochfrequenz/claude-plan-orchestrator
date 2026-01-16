@@ -192,3 +192,25 @@ func TestSetGroupPriority(t *testing.T) {
 		t.Errorf("priorities[auth] = %d, want 1", priorities["auth"])
 	}
 }
+
+func TestRemoveGroupPriority(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Add a group
+	store.SetGroupPriority("auth", 1)
+
+	// Remove it
+	if err := store.RemoveGroupPriority("auth"); err != nil {
+		t.Fatalf("RemoveGroupPriority() error = %v", err)
+	}
+
+	// Verify removal
+	priorities, _ := store.GetGroupPriorities()
+	if _, exists := priorities["auth"]; exists {
+		t.Errorf("auth group should be removed")
+	}
+}

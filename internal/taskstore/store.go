@@ -382,6 +382,12 @@ func (s *Store) SetGroupPriority(group string, priority int) error {
 	return err
 }
 
+// RemoveGroupPriority removes a group from the priorities table
+func (s *Store) RemoveGroupPriority(group string) error {
+	_, err := s.db.Exec("DELETE FROM group_priorities WHERE group_name = ?", group)
+	return err
+}
+
 // ListRecentAgentRuns returns completed/failed agent runs, in chronological order (oldest first)
 func (s *Store) ListRecentAgentRuns(limit int) ([]*AgentRun, error) {
 	// Get the N most recent runs, then reverse to show in chronological order
