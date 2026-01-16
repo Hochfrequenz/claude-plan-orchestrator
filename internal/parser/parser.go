@@ -16,11 +16,7 @@ import (
 
 var (
 	epicFileRegex = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)
-	// moduleDirRegex matches standard module directories like "technical-module"
-	moduleDirRegex = regexp.MustCompile(`^([a-z][a-z0-9-]*)-module$`)
-	// extendedModuleDirRegex matches extended module directories like "customer-module-expanded"
-	extendedModuleDirRegex = regexp.MustCompile(`^([a-z][a-z0-9-]*-module-[a-z][a-z0-9-]*)$`)
-	titleRegex             = regexp.MustCompile(`^#\s+(.+)$`)
+	titleRegex    = regexp.MustCompile(`^#\s+(.+)$`)
 	// Match table rows like: | [E01](path) | Description | 🟢 | or | E01 | Title | 🟢 |
 	readmeStatusRegex = regexp.MustCompile(`\|\s*\[?E(\d+)\]?(?:\([^)]*\))?\s*\|.*([🔴🟡🟢])\s*\|`)
 )
@@ -307,22 +303,11 @@ func ExtractTaskIDFromPath(path string) (domain.TaskID, error) {
 	return domain.TaskID{Module: module, EpicNum: epicNum}, nil
 }
 
-// extractModuleName extracts the module name from a directory name
-// Handles patterns like:
-//   - "technical-module" -> "technical"
-//   - "customer-module-expanded" -> "customer-module-expanded"
-//   - "testing-strategy" -> "testing-strategy"
+// extractModuleName extracts the group name from a directory name.
+// Any valid directory name (lowercase letters, numbers, hyphens) is accepted.
+// The directory name IS the group name - no suffix stripping.
 func extractModuleName(dirName string) string {
-	// Try standard module pattern first: xxx-module -> xxx
-	if matches := moduleDirRegex.FindStringSubmatch(dirName); matches != nil {
-		return matches[1]
-	}
-	// Try extended module pattern: xxx-module-yyy -> xxx-module-yyy (keep as-is)
-	if extendedModuleDirRegex.MatchString(dirName) {
-		return dirName
-	}
-	// For any other directory with lowercase letters and hyphens, use as-is
-	// This handles directories like "testing-strategy", "infrastructure", etc.
+	// Accept any directory with lowercase letters, numbers, and hyphens
 	if regexp.MustCompile(`^[a-z][a-z0-9-]*$`).MatchString(dirName) {
 		return dirName
 	}

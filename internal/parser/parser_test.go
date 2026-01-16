@@ -33,8 +33,8 @@ Implement input validation for all user-facing forms.
 		t.Fatal(err)
 	}
 
-	if task.ID.String() != "technical/E05" {
-		t.Errorf("ID = %q, want technical/E05", task.ID.String())
+	if task.ID.String() != "technical-module/E05" {
+		t.Errorf("ID = %q, want technical-module/E05", task.ID.String())
 	}
 	if task.Title != "Epic 05: Validators" {
 		t.Errorf("Title = %q, want 'Epic 05: Validators'", task.Title)
@@ -145,10 +145,17 @@ func TestExtractTaskIDFromPath(t *testing.T) {
 		wantEpic   int
 		wantErr    bool
 	}{
-		{"/plans/technical-module/epic-05-validators.md", "technical", 5, false},
-		{"/plans/billing-module/epic-00-setup.md", "billing", 0, false},
+		// Existing tests - updated for new behavior (directory name used as-is)
+		{"/plans/technical-module/epic-05-validators.md", "technical-module", 5, false},
+		{"/plans/billing-module/epic-00-setup.md", "billing-module", 0, false},
 		{"/plans/some-module/00-overview.md", "", 0, true},
 		{"/plans/invalid/file.txt", "", 0, true},
+		// New test cases for flexible group names
+		{"docs/plans/billing/epic-00-setup.md", "billing", 0, false},
+		{"docs/plans/auth-subsystem/epic-01-login.md", "auth-subsystem", 1, false},
+		{"docs/plans/payment-feature/epic-02-checkout.md", "payment-feature", 2, false},
+		{"docs/plans/api-v2-migration/epic-00-prep.md", "api-v2-migration", 0, false},
+		{"docs/plans/technical-module/epic-05-validators.md", "technical-module", 5, false},
 	}
 
 	for _, tt := range tests {

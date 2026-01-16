@@ -364,7 +364,7 @@ status: complete
 	store, _ := taskstore.New(":memory:")
 	defer store.Close()
 	store.UpsertTask(&domain.Task{
-		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		ID:       domain.TaskID{Module: "technical-module", EpicNum: 5},
 		Title:    "Validators",
 		Status:   domain.StatusInProgress,
 		FilePath: epicPath,
@@ -374,7 +374,7 @@ status: complete
 
 	// Resolve: use markdown value (complete)
 	resolutions := map[string]string{
-		"technical/E05": "markdown",
+		"technical-module/E05": "markdown",
 	}
 	err := syncer.ResolveConflicts(store, resolutions)
 	if err != nil {
@@ -382,7 +382,7 @@ status: complete
 	}
 
 	// Verify DB was updated to complete
-	task, _ := store.GetTask("technical/E05")
+	task, _ := store.GetTask("technical-module/E05")
 	if task.Status != domain.StatusComplete {
 		t.Errorf("DB should have status complete, got %s", task.Status)
 	}
@@ -406,7 +406,7 @@ status: complete
 	store, _ := taskstore.New(":memory:")
 	defer store.Close()
 	store.UpsertTask(&domain.Task{
-		ID:       domain.TaskID{Module: "technical", EpicNum: 5},
+		ID:       domain.TaskID{Module: "technical-module", EpicNum: 5},
 		Title:    "Validators",
 		Status:   domain.StatusInProgress,
 		FilePath: epicPath,
@@ -416,7 +416,7 @@ status: complete
 
 	// Try with invalid resolution value
 	resolutions := map[string]string{
-		"technical/E05": "invalid",
+		"technical-module/E05": "invalid",
 	}
 	err := syncer.ResolveConflicts(store, resolutions)
 	if err == nil {
@@ -486,19 +486,19 @@ func TestTwoWaySync_UpdatesDependencies(t *testing.T) {
 
 	// E01 incorrectly has E00 as dependency (stale data)
 	store.UpsertTask(&domain.Task{
-		ID:        domain.TaskID{Module: "pm-tool", EpicNum: 1},
+		ID:        domain.TaskID{Module: "pm-tool-module", EpicNum: 1},
 		Title:     "Foundation",
 		Status:    domain.StatusNotStarted,
-		DependsOn: []domain.TaskID{{Module: "pm-tool", EpicNum: 0}}, // Stale!
+		DependsOn: []domain.TaskID{{Module: "pm-tool-module", EpicNum: 0}}, // Stale!
 		FilePath:  epic1,
 	})
 
 	// E02 depends on E01
 	store.UpsertTask(&domain.Task{
-		ID:        domain.TaskID{Module: "pm-tool", EpicNum: 2},
+		ID:        domain.TaskID{Module: "pm-tool-module", EpicNum: 2},
 		Title:     "Domain",
 		Status:    domain.StatusNotStarted,
-		DependsOn: []domain.TaskID{{Module: "pm-tool", EpicNum: 1}},
+		DependsOn: []domain.TaskID{{Module: "pm-tool-module", EpicNum: 1}},
 		FilePath:  epic2,
 	})
 
@@ -514,7 +514,7 @@ func TestTwoWaySync_UpdatesDependencies(t *testing.T) {
 	}
 
 	// Verify E01's dependencies were updated (should be empty since E00 doesn't exist)
-	task1, _ := store.GetTask("pm-tool/E01")
+	task1, _ := store.GetTask("pm-tool-module/E01")
 	if task1 == nil {
 		t.Fatal("E01 not found in DB")
 	}
@@ -523,7 +523,7 @@ func TestTwoWaySync_UpdatesDependencies(t *testing.T) {
 	}
 
 	// Verify E02 still depends on E01 (since E01 exists)
-	task2, _ := store.GetTask("pm-tool/E02")
+	task2, _ := store.GetTask("pm-tool-module/E02")
 	if task2 == nil {
 		t.Fatal("E02 not found in DB")
 	}
