@@ -52,6 +52,9 @@ func New(dbPath string) (*Store, error) {
 	// Add index on tasks.github_issue for query performance
 	db.Exec(migrationTasksGitHubIssueIndex)
 
+	// Add prefix column to tasks for subsystem prefixes (CLI, TUI, etc.)
+	db.Exec(migrationAddTaskPrefix)
+
 	return &Store{db: db}, nil
 }
 
@@ -68,9 +71,12 @@ func (s *Store) UpsertTask(task *domain.Task) error {
 	}
 
 	_, err = s.db.Exec(`
-		INSERT INTO tasks (id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (id, module, prefix, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			module = excluded.module,
+			prefix = excluded.prefix,
+			epic_num = excluded.epic_num,
 			title = excluded.title,
 			description = excluded.description,
 			status = excluded.status,
@@ -83,6 +89,7 @@ func (s *Store) UpsertTask(task *domain.Task) error {
 	`,
 		task.ID.String(),
 		task.ID.Module,
+		task.ID.Prefix,
 		task.ID.EpicNum,
 		task.Title,
 		task.Description,
@@ -101,7 +108,7 @@ func (s *Store) UpsertTask(task *domain.Task) error {
 // GetTask retrieves a task by ID
 func (s *Store) GetTask(id string) (*domain.Task, error) {
 	row := s.db.QueryRow(`
-		SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at
+		SELECT id, module, prefix, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at
 		FROM tasks WHERE id = ?
 	`, id)
 
@@ -116,7 +123,7 @@ type ListOptions struct {
 
 // ListTasks returns tasks matching the given options
 func (s *Store) ListTasks(opts ListOptions) ([]*domain.Task, error) {
-	query := `SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at FROM tasks WHERE 1=1`
+	query := `SELECT id, module, prefix, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at FROM tasks WHERE 1=1`
 	var args []interface{}
 
 	if opts.Module != "" {
@@ -176,18 +183,18 @@ func (s *Store) GetCompletedTaskIDs() (map[string]bool, error) {
 
 func scanTask(row *sql.Row) (*domain.Task, error) {
 	var task domain.Task
-	var id, module string
+	var id, module, prefix string
 	var epicNum int
 	var status, priority, depsJSON string
 	var description sql.NullString
 	var githubIssue sql.NullInt64
 
-	err := row.Scan(&id, &module, &epicNum, &task.Title, &description, &status, &priority, &depsJSON, &task.NeedsReview, &task.FilePath, &githubIssue, &task.CreatedAt, &task.UpdatedAt)
+	err := row.Scan(&id, &module, &prefix, &epicNum, &task.Title, &description, &status, &priority, &depsJSON, &task.NeedsReview, &task.FilePath, &githubIssue, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 
-	task.ID = domain.TaskID{Module: module, EpicNum: epicNum}
+	task.ID = domain.TaskID{Module: module, Prefix: prefix, EpicNum: epicNum}
 	task.Status = domain.TaskStatus(status)
 	task.Priority = domain.Priority(priority)
 	if description.Valid {
@@ -211,18 +218,18 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 
 func scanTaskRows(rows *sql.Rows) (*domain.Task, error) {
 	var task domain.Task
-	var id, module string
+	var id, module, prefix string
 	var epicNum int
 	var status, priority, depsJSON string
 	var description sql.NullString
 	var githubIssue sql.NullInt64
 
-	err := rows.Scan(&id, &module, &epicNum, &task.Title, &description, &status, &priority, &depsJSON, &task.NeedsReview, &task.FilePath, &githubIssue, &task.CreatedAt, &task.UpdatedAt)
+	err := rows.Scan(&id, &module, &prefix, &epicNum, &task.Title, &description, &status, &priority, &depsJSON, &task.NeedsReview, &task.FilePath, &githubIssue, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 
-	task.ID = domain.TaskID{Module: module, EpicNum: epicNum}
+	task.ID = domain.TaskID{Module: module, Prefix: prefix, EpicNum: epicNum}
 	task.Status = domain.TaskStatus(status)
 	task.Priority = domain.Priority(priority)
 	if description.Valid {
@@ -640,7 +647,7 @@ func (s *Store) ListGitHubIssues() ([]*domain.GitHubIssue, error) {
 // GetIncompleteEpicsForIssue returns all tasks linked to a GitHub issue that are not complete
 func (s *Store) GetIncompleteEpicsForIssue(issueNumber int) ([]*domain.Task, error) {
 	rows, err := s.db.Query(`
-		SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at
+		SELECT id, module, prefix, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at
 		FROM tasks WHERE github_issue = ? AND status != ?
 	`, issueNumber, string(domain.StatusComplete))
 	if err != nil {

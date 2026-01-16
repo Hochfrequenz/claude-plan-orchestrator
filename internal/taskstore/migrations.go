@@ -122,3 +122,8 @@ ALTER TABLE tasks ADD COLUMN github_issue INTEGER REFERENCES github_issues(issue
 const migrationTasksGitHubIssueIndex = `
 CREATE INDEX IF NOT EXISTS idx_tasks_github_issue ON tasks(github_issue);
 `
+
+// Migration to add prefix column to tasks for subsystem prefixes (CLI, TUI, etc.)
+const migrationAddTaskPrefix = `
+ALTER TABLE tasks ADD COLUMN prefix TEXT NOT NULL DEFAULT '';
+`
