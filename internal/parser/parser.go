@@ -16,29 +16,37 @@ import (
 
 var (
 	// Epic file patterns - supports multiple naming conventions:
-	// - epic-01-name.md (standard)
-	// - 01-epic-name.md (number prefix)
-	// - epic-cli-02-name.md (epic with subsystem prefix)
-	epicFilePatterns = []*regexp.Regexp{
-		regexp.MustCompile(`^epic-(\d+)-.*\.md$`),        // epic-01-name.md
-		regexp.MustCompile(`^(\d+)-epic-.*\.md$`),        // 01-epic-name.md
-		regexp.MustCompile(`^epic-[a-z]+-(\d+)-.*\.md$`), // epic-cli-02-name.md
-	}
+	// - epic-01-name.md (standard) -> E01
+	// - 01-epic-name.md (number prefix) -> E01
+	// - epic-cli-02-name.md (epic with subsystem prefix) -> CLI02
+	epicFileStandard  = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)        // epic-01-name.md
+	epicFileNumPrefix = regexp.MustCompile(`^(\d+)-epic-.*\.md$`)        // 01-epic-name.md
+	epicFileSubsystem = regexp.MustCompile(`^epic-([a-z]+)-(\d+)-.*\.md$`) // epic-cli-02-name.md
+
 	titleRegex = regexp.MustCompile(`^#\s+(.+)$`)
 	// Match table rows like: | [E01](path) | Description | 🟢 | or | E01 | Title | 🟢 |
 	readmeStatusRegex = regexp.MustCompile(`\|\s*\[?E(\d+)\]?(?:\([^)]*\))?\s*\|.*([🔴🟡🟢])\s*\|`)
 )
 
 // matchEpicFile tries to match a filename against epic file patterns.
-// Returns the epic number and true if matched, or 0 and false if not.
-func matchEpicFile(filename string) (epicNum int, ok bool) {
-	for _, re := range epicFilePatterns {
-		if matches := re.FindStringSubmatch(filename); matches != nil {
-			num, _ := strconv.Atoi(matches[1])
-			return num, true
-		}
+// Returns the prefix (uppercase, e.g., "CLI", "TUI", or "" for standard), epic number, and true if matched.
+func matchEpicFile(filename string) (prefix string, epicNum int, ok bool) {
+	// Standard pattern: epic-01-name.md -> E01
+	if matches := epicFileStandard.FindStringSubmatch(filename); matches != nil {
+		num, _ := strconv.Atoi(matches[1])
+		return "", num, true
 	}
-	return 0, false
+	// Number prefix pattern: 01-epic-name.md -> E01
+	if matches := epicFileNumPrefix.FindStringSubmatch(filename); matches != nil {
+		num, _ := strconv.Atoi(matches[1])
+		return "", num, true
+	}
+	// Subsystem prefix pattern: epic-cli-02-name.md -> CLI02
+	if matches := epicFileSubsystem.FindStringSubmatch(filename); matches != nil {
+		num, _ := strconv.Atoi(matches[2])
+		return strings.ToUpper(matches[1]), num, true
+	}
+	return "", 0, false
 }
 
 // ParseEpicFile parses a single epic markdown file into a Task
@@ -96,7 +104,7 @@ func ParseModuleDir(dir string) ([]*domain.Task, error) {
 		if entry.IsDir() {
 			continue
 		}
-		if _, ok := matchEpicFile(entry.Name()); !ok {
+		if _, _, ok := matchEpicFile(entry.Name()); !ok {
 			continue
 		}
 
@@ -190,7 +198,7 @@ func directoryHasEpicFiles(dir string) (bool, error) {
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
-			if _, ok := matchEpicFile(entry.Name()); ok {
+			if _, _, ok := matchEpicFile(entry.Name()); ok {
 				return true, nil
 			}
 		}
@@ -297,13 +305,13 @@ func ExtractTaskIDFromPath(path string) (domain.TaskID, error) {
 		return domain.TaskID{}, fmt.Errorf("invalid module directory: %s", dirBase)
 	}
 
-	// Extract epic number from filename
-	epicNum, ok := matchEpicFile(base)
+	// Extract prefix and epic number from filename
+	prefix, epicNum, ok := matchEpicFile(base)
 	if !ok {
 		return domain.TaskID{}, fmt.Errorf("invalid epic filename: %s", base)
 	}
 
-	return domain.TaskID{Module: module, EpicNum: epicNum}, nil
+	return domain.TaskID{Module: module, Prefix: prefix, EpicNum: epicNum}, nil
 }
 
 // extractModuleName extracts the group name from a directory name.

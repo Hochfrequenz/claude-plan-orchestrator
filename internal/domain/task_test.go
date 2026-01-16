@@ -8,14 +8,21 @@ func TestTaskID_Parse(t *testing.T) {
 	tests := []struct {
 		input      string
 		wantModule string
+		wantPrefix string
 		wantEpic   int
 		wantErr    bool
 	}{
-		{"technical/E05", "technical", 5, false},
-		{"billing/E00", "billing", 0, false},
-		{"pricing/E123", "pricing", 123, false},
-		{"invalid", "", 0, true},
-		{"module/invalid", "", 0, true},
+		// Standard format: module/E##
+		{"technical/E05", "technical", "", 5, false},
+		{"billing/E00", "billing", "", 0, false},
+		{"pricing/E123", "pricing", "", 123, false},
+		// Prefix format: module/PREFIX##
+		{"cli-impl/CLI02", "cli-impl", "CLI", 2, false},
+		{"cli-impl/TUI05", "cli-impl", "TUI", 5, false},
+		{"api-module/API00", "api-module", "API", 0, false},
+		// Invalid formats
+		{"invalid", "", "", 0, true},
+		{"module/invalid", "", "", 0, true},
 	}
 
 	for _, tt := range tests {
@@ -29,6 +36,9 @@ func TestTaskID_Parse(t *testing.T) {
 				if tid.Module != tt.wantModule {
 					t.Errorf("Module = %q, want %q", tid.Module, tt.wantModule)
 				}
+				if tid.Prefix != tt.wantPrefix {
+					t.Errorf("Prefix = %q, want %q", tid.Prefix, tt.wantPrefix)
+				}
 				if tid.EpicNum != tt.wantEpic {
 					t.Errorf("EpicNum = %d, want %d", tid.EpicNum, tt.wantEpic)
 				}
@@ -38,9 +48,23 @@ func TestTaskID_Parse(t *testing.T) {
 }
 
 func TestTaskID_String(t *testing.T) {
+	// Standard format without prefix
 	tid := TaskID{Module: "technical", EpicNum: 5}
 	if got := tid.String(); got != "technical/E05" {
 		t.Errorf("String() = %q, want %q", got, "technical/E05")
+	}
+
+	// With prefix
+	tidWithPrefix := TaskID{Module: "cli-impl", Prefix: "CLI", EpicNum: 2}
+	if got := tidWithPrefix.String(); got != "cli-impl/CLI02" {
+		t.Errorf("String() = %q, want %q", got, "cli-impl/CLI02")
+	}
+
+	// Verify round-trip: parse -> string -> parse
+	original := "module/TUI05"
+	parsed, _ := ParseTaskID(original)
+	if got := parsed.String(); got != original {
+		t.Errorf("Round-trip failed: %q -> %q", original, got)
 	}
 }
 
