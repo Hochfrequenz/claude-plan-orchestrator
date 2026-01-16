@@ -1662,6 +1662,150 @@ func renderConflictLine(conflict isync.SyncConflict, resolution string, selected
 	return queuedStyle.Render("  " + line)
 }
 
+func (m Model) renderGroupPriorities() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("GROUP PRIORITIES"))
+	b.WriteString("\n\n")
+
+	if len(m.groupPriorityItems) == 0 {
+		b.WriteString(queuedStyle.Render("  No groups found. Run 'claude-orch sync' to load tasks."))
+		return b.String()
+	}
+
+	// Group items by tier
+	tiers := make(map[int][]GroupPriorityItem)
+	var maxTier int
+	for _, item := range m.groupPriorityItems {
+		tier := item.Priority
+		if tier < 0 {
+			tier = 0 // Unassigned defaults to tier 0 for display
+		}
+		tiers[tier] = append(tiers[tier], item)
+		if tier > maxTier {
+			maxTier = tier
+		}
+	}
+
+	// Determine active tier (lowest with incomplete tasks)
+	activeTier := 0
+	for tier := 0; tier <= maxTier; tier++ {
+		for _, item := range tiers[tier] {
+			if item.Completed < item.Total {
+				activeTier = tier
+				goto foundActive
+			}
+		}
+	}
+foundActive:
+
+	// Also track unassigned items separately for display
+	var unassignedItems []GroupPriorityItem
+	for _, item := range m.groupPriorityItems {
+		if item.Priority == -1 {
+			unassignedItems = append(unassignedItems, item)
+		}
+	}
+
+	// Render each tier
+	itemIndex := 0
+	for tier := 0; tier <= maxTier; tier++ {
+		items := tiers[tier]
+		// Filter out unassigned items from tier 0 display (they go in separate section)
+		if tier == 0 {
+			var assigned []GroupPriorityItem
+			for _, item := range items {
+				if item.Priority >= 0 {
+					assigned = append(assigned, item)
+				}
+			}
+			items = assigned
+		}
+		if len(items) == 0 {
+			continue
+		}
+
+		// Tier header
+		tierStatus := "waiting"
+		if tier == activeTier {
+			tierStatus = "active"
+		} else if tier < activeTier {
+			tierStatus = "complete"
+		}
+		tierHeader := fmt.Sprintf("  Tier %d (%s)", tier, tierStatus)
+		if tier == activeTier {
+			b.WriteString(runningStyle.Render(tierHeader))
+		} else {
+			b.WriteString(queuedStyle.Render(tierHeader))
+		}
+		b.WriteString("\n")
+
+		// Render items in this tier
+		for _, item := range items {
+			selected := itemIndex == m.selectedPriorityRow
+			var statusIcon string
+			var style lipgloss.Style
+
+			if item.Completed == item.Total && item.Total > 0 {
+				statusIcon = "✓"
+				style = completedStyle
+			} else if tier == activeTier {
+				statusIcon = "●"
+				style = runningStyle
+			} else {
+				statusIcon = "○"
+				style = queuedStyle
+			}
+
+			line := fmt.Sprintf("    %s %-18s [%d/%d complete]",
+				statusIcon, truncate(item.Name, 18), item.Completed, item.Total)
+
+			if selected {
+				line = fmt.Sprintf("  > %s", line[4:])
+				b.WriteString(tabActiveStyle.Render(line))
+			} else {
+				b.WriteString(style.Render(line))
+			}
+			b.WriteString("\n")
+			itemIndex++
+		}
+		b.WriteString("\n")
+	}
+
+	// Show unassigned groups section
+	if len(unassignedItems) > 0 {
+		b.WriteString(queuedStyle.Render("  (unassigned - runs with tier 0)"))
+		b.WriteString("\n")
+		for _, item := range unassignedItems {
+			selected := itemIndex == m.selectedPriorityRow
+			statusIcon := "○"
+			style := queuedStyle
+
+			if item.Completed == item.Total && item.Total > 0 {
+				statusIcon = "✓"
+				style = completedStyle
+			}
+
+			line := fmt.Sprintf("    %s %-18s [%d/%d complete]",
+				statusIcon, truncate(item.Name, 18), item.Completed, item.Total)
+
+			if selected {
+				line = fmt.Sprintf("  > %s", line[4:])
+				b.WriteString(tabActiveStyle.Render(line))
+			} else {
+				b.WriteString(style.Render(line))
+			}
+			b.WriteString("\n")
+			itemIndex++
+		}
+	}
+
+	// Help text
+	b.WriteString("\n")
+	b.WriteString(queuedStyle.Render("  [↑/↓] select  [+/-] change tier  [u] unassign  [g] back"))
+
+	return b.String()
+}
+
 // renderMaintenanceModal renders the maintenance task selection modal
 func (m Model) renderMaintenanceModal() string {
 	var b strings.Builder
