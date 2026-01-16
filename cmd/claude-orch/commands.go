@@ -14,6 +14,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/config"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/issues"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/observer"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/skills"
@@ -25,12 +26,14 @@ import (
 )
 
 var (
-	startCount   int
-	startModule  string
-	listStatus   string
-	listModule   string
-	listPriority int
-	servePort    int
+	startCount     int
+	startModule    string
+	listStatus     string
+	listModule     string
+	listPriority   int
+	servePort      int
+	syncSkipIssues bool
+	syncIssuesOnly bool
 )
 
 func init() {
@@ -69,6 +72,8 @@ func init() {
 		Short: "Sync tasks from markdown files",
 		RunE:  runSync,
 	}
+	syncCmd.Flags().BoolVar(&syncSkipIssues, "skip-issues", false, "Skip GitHub issue analysis")
+	syncCmd.Flags().BoolVar(&syncIssuesOnly, "issues-only", false, "Only analyze issues, skip markdown sync")
 	rootCmd.AddCommand(syncCmd)
 
 	// logs command
@@ -297,29 +302,41 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	syncer := sync.New(plansDir)
-	result, err := syncer.TwoWaySync(store)
-	if err != nil {
-		return fmt.Errorf("sync failed: %w", err)
-	}
-
-	// Report results
-	if result.MarkdownToDBCount > 0 {
-		fmt.Printf("Synced %d tasks from markdown to database\n", result.MarkdownToDBCount)
-	}
-	if result.DBToMarkdownCount > 0 {
-		fmt.Printf("Synced %d tasks from database to markdown\n", result.DBToMarkdownCount)
-	}
-
-	// Report conflicts
-	if len(result.Conflicts) > 0 {
-		fmt.Printf("\n%d conflicts detected:\n", len(result.Conflicts))
-		for _, c := range result.Conflicts {
-			fmt.Printf("  %s: DB=%s, Markdown=%s\n", c.TaskID, c.DBStatus, c.MarkdownStatus)
+	// Markdown sync (unless --issues-only)
+	if !syncIssuesOnly {
+		syncer := sync.New(plansDir)
+		result, err := syncer.TwoWaySync(store)
+		if err != nil {
+			return fmt.Errorf("sync failed: %w", err)
 		}
-		fmt.Println("\nUse 'claude-orch tui' to resolve conflicts interactively.")
-	} else {
-		fmt.Println("No conflicts found.")
+
+		// Report results
+		if result.MarkdownToDBCount > 0 {
+			fmt.Printf("Synced %d tasks from markdown to database\n", result.MarkdownToDBCount)
+		}
+		if result.DBToMarkdownCount > 0 {
+			fmt.Printf("Synced %d tasks from database to markdown\n", result.DBToMarkdownCount)
+		}
+
+		// Report conflicts
+		if len(result.Conflicts) > 0 {
+			fmt.Printf("\n%d conflicts detected:\n", len(result.Conflicts))
+			for _, c := range result.Conflicts {
+				fmt.Printf("  %s: DB=%s, Markdown=%s\n", c.TaskID, c.DBStatus, c.MarkdownStatus)
+			}
+			fmt.Println("\nUse 'claude-orch tui' to resolve conflicts interactively.")
+		} else {
+			fmt.Println("No conflicts found.")
+		}
+	}
+
+	// Issue analysis (unless --skip-issues or disabled)
+	if !syncSkipIssues && cfg.GitHubIssues.Enabled {
+		analyzer := issues.NewAnalyzer(store, &cfg.GitHubIssues, plansDir)
+		if err := analyzer.AnalyzeCandidates(cmd.Context(), cfg.General.MaxParallelAgents); err != nil {
+			return fmt.Errorf("issue analysis: %w", err)
+		}
+		fmt.Println("Issue analysis complete")
 	}
 
 	return nil
