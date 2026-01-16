@@ -61,6 +61,14 @@ type MaintenanceModal struct {
 	TargetModule string // Selected module name for scope
 }
 
+// GroupPriorityItem represents a group in the priorities view
+type GroupPriorityItem struct {
+	Name      string
+	Priority  int // -1 if unassigned
+	Total     int
+	Completed int
+}
+
 // Model is the TUI application model
 type Model struct {
 	// Data
@@ -136,6 +144,11 @@ type Model struct {
 
 	// Maintenance modal state
 	maintenanceModal MaintenanceModal
+
+	// Group priorities view state
+	showGroupPriorities bool                // Toggle with 'g' key
+	groupPriorityItems  []GroupPriorityItem // Groups with their priorities
+	selectedPriorityRow int                 // Currently selected row
 }
 
 // AgentView represents an agent in the TUI
