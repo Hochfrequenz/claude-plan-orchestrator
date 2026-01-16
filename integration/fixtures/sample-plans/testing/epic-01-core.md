@@ -1,6 +1,6 @@
 ---
 priority: high
-depends_on: [test/E00]
+depends_on: [testing/E00]
 needs_review: true
 ---
 # Epic 01: Core Implementation

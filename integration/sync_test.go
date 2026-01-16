@@ -65,9 +65,9 @@ func TestSyncFlow_ParseToStore(t *testing.T) {
 		wantReview   bool
 		wantDeps     int
 	}{
-		{"test/E00", domain.StatusComplete, domain.PriorityHigh, false, 0},
-		{"test/E01", domain.StatusInProgress, domain.PriorityHigh, true, 1},
-		{"test/E02", domain.StatusNotStarted, domain.PriorityMedium, true, 2},
+		{"testing/E00", domain.StatusComplete, domain.PriorityHigh, false, 0},
+		{"testing/E01", domain.StatusInProgress, domain.PriorityHigh, true, 1},
+		{"testing/E02", domain.StatusNotStarted, domain.PriorityMedium, true, 2},
 		{"billing/E00", domain.StatusComplete, domain.PriorityHigh, false, 0},
 		{"billing/E01", domain.StatusNotStarted, domain.PriorityMedium, true, 1},
 	}
@@ -116,11 +116,11 @@ func TestSyncFlow_StatusFromReadme(t *testing.T) {
 	// Verify statuses from README
 	// green_circle = complete, yellow_circle = in_progress, red_circle = not_started
 	expectedStatuses := map[string]domain.TaskStatus{
-		"test/E00":    domain.StatusComplete,    // green_circle
-		"test/E01":    domain.StatusInProgress,  // yellow_circle
-		"test/E02":    domain.StatusNotStarted,  // red_circle
-		"billing/E00": domain.StatusComplete,    // green_circle
-		"billing/E01": domain.StatusNotStarted,  // red_circle
+		"testing/E00": domain.StatusComplete,   // green_circle
+		"testing/E01": domain.StatusInProgress, // yellow_circle
+		"testing/E02": domain.StatusNotStarted, // red_circle
+		"billing/E00": domain.StatusComplete,   // green_circle
+		"billing/E01": domain.StatusNotStarted, // red_circle
 	}
 
 	for id, expected := range expectedStatuses {
@@ -160,9 +160,9 @@ func TestSyncFlow_DependencyResolution(t *testing.T) {
 	// Get ready tasks - should be tasks with all dependencies satisfied
 	ready := sched.GetReadyTasks(10)
 
-	// test/E00 and billing/E00 are complete
-	// test/E01 depends on test/E00 (complete) -> should be ready (but it's in_progress)
-	// test/E02 depends on test/E01 (in_progress) and billing/E00 (complete) -> not ready
+	// testing/E00 and billing/E00 are complete
+	// testing/E01 depends on testing/E00 (complete) -> should be ready (but it's in_progress)
+	// testing/E02 depends on testing/E01 (in_progress) and billing/E00 (complete) -> not ready
 	// billing/E01 depends on billing/E00 (complete) -> should be ready
 
 	// Ready tasks should be those not complete and with satisfied deps
@@ -176,9 +176,9 @@ func TestSyncFlow_DependencyResolution(t *testing.T) {
 		t.Error("billing/E01 should be ready (deps satisfied)")
 	}
 
-	// test/E02 should NOT be ready (depends on test/E01 which is in_progress)
-	if readyIDs["test/E02"] {
-		t.Error("test/E02 should NOT be ready (test/E01 not complete)")
+	// testing/E02 should NOT be ready (depends on testing/E01 which is in_progress)
+	if readyIDs["testing/E02"] {
+		t.Error("testing/E02 should NOT be ready (testing/E01 not complete)")
 	}
 }
 
@@ -199,14 +199,14 @@ func TestSyncFlow_ModuleFiltering(t *testing.T) {
 		store.UpsertTask(task)
 	}
 
-	// Filter by test module
-	testTasks, err := store.ListTasks(taskstore.ListOptions{Module: "test"})
+	// Filter by testing module
+	testingTasks, err := store.ListTasks(taskstore.ListOptions{Module: "testing"})
 	if err != nil {
 		t.Fatalf("ListTasks failed: %v", err)
 	}
 
-	if len(testTasks) != 3 {
-		t.Errorf("Test module task count = %d, want 3", len(testTasks))
+	if len(testingTasks) != 3 {
+		t.Errorf("Testing module task count = %d, want 3", len(testingTasks))
 	}
 
 	// Filter by billing module
@@ -242,11 +242,11 @@ func TestSyncFlow_UpsertUpdatesExisting(t *testing.T) {
 
 	// Insert initial task
 	task := &domain.Task{
-		ID:       domain.TaskID{Module: "test", EpicNum: 0},
+		ID:       domain.TaskID{Module: "testing", EpicNum: 0},
 		Title:    "Original Title",
 		Status:   domain.StatusNotStarted,
 		Priority: domain.PriorityLow,
-		FilePath: "/test/epic-00.md",
+		FilePath: "/testing/epic-00.md",
 	}
 	store.UpsertTask(task)
 
@@ -257,7 +257,7 @@ func TestSyncFlow_UpsertUpdatesExisting(t *testing.T) {
 	store.UpsertTask(task)
 
 	// Verify updates were applied
-	got, _ := store.GetTask("test/E00")
+	got, _ := store.GetTask("testing/E00")
 
 	if got.Title != "Updated Title" {
 		t.Errorf("Title = %q, want 'Updated Title'", got.Title)

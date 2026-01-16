@@ -1,6 +1,6 @@
 ---
 priority: medium
-depends_on: [test/E01, billing/E00]
+depends_on: [testing/E01, billing/E00]
 needs_review: true
 ---
 # Epic 02: Advanced Features
