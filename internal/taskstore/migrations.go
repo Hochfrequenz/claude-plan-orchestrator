@@ -82,6 +82,13 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_task_id ON agent_runs(task_id);
+
+CREATE TABLE IF NOT EXISTS group_priorities (
+    group_name TEXT PRIMARY KEY,
+    priority   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_priorities_priority ON group_priorities(priority);
 `
 
 // Migration to add session_id column to existing databases

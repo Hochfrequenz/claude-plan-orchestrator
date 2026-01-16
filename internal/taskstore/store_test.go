@@ -122,3 +122,18 @@ func TestStore_UpdateTaskStatus(t *testing.T) {
 		t.Errorf("Status = %q, want in_progress", got.Status)
 	}
 }
+
+func TestGroupPrioritiesTableExists(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Query the table to verify it exists
+	var count int
+	err = store.db.QueryRow("SELECT COUNT(*) FROM group_priorities").Scan(&count)
+	if err != nil {
+		t.Errorf("group_priorities table does not exist: %v", err)
+	}
+}
