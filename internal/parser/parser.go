@@ -121,24 +121,32 @@ func ParseModuleDir(dir string) ([]*domain.Task, error) {
 		existingTasks[task.ID.String()] = true
 	}
 
-	// Add implicit dependencies (only if target task exists)
+	// Add implicit dependencies (find highest existing predecessor in same sequence)
 	for _, task := range tasks {
-		if dep := task.ImplicitDependency(); dep != nil {
-			// Only add if the dependency actually exists
-			if !existingTasks[dep.String()] {
-				continue
+		// Find the highest existing task in same sequence (module+prefix) below this one
+		var bestDep *domain.TaskID
+		for epicNum := task.ID.EpicNum - 1; epicNum >= 0; epicNum-- {
+			candidate := domain.TaskID{Module: task.ID.Module, Prefix: task.ID.Prefix, EpicNum: epicNum}
+			if existingTasks[candidate.String()] {
+				bestDep = &candidate
+				break // Found highest existing predecessor
 			}
-			// Check if already in explicit deps
-			found := false
-			for _, d := range task.DependsOn {
-				if d.String() == dep.String() {
-					found = true
-					break
-				}
+		}
+
+		if bestDep == nil {
+			continue // No predecessor exists
+		}
+
+		// Check if already in explicit deps
+		found := false
+		for _, d := range task.DependsOn {
+			if d.String() == bestDep.String() {
+				found = true
+				break
 			}
-			if !found {
-				task.DependsOn = append(task.DependsOn, *dep)
-			}
+		}
+		if !found {
+			task.DependsOn = append(task.DependsOn, *bestDep)
 		}
 	}
 
