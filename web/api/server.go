@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
@@ -56,8 +57,23 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/status", s.statusHandler())
 	s.mux.HandleFunc("/api/tasks", s.listTasksHandler())
 	s.mux.HandleFunc("/api/tasks/", s.getTaskHandler())
-	s.mux.HandleFunc("/api/agents", s.listAgentsHandler())
 	s.mux.HandleFunc("/api/events", s.sseHandler())
+
+	// Agent routes
+	s.mux.HandleFunc("/api/agents", s.listAgentsHandler())
+	s.mux.Handle("/api/agents/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, "/stop"):
+			s.stopAgentHandler().ServeHTTP(w, r)
+		case strings.HasSuffix(path, "/resume"):
+			s.resumeAgentHandler().ServeHTTP(w, r)
+		case strings.HasSuffix(path, "/logs"):
+			s.agentLogsHandler().ServeHTTP(w, r)
+		default:
+			s.getAgentHandler().ServeHTTP(w, r)
+		}
+	}))
 
 	// Batch control routes
 	s.mux.HandleFunc("/api/batch/status", s.batchStatusHandler())
