@@ -1036,15 +1036,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncModal.Selected = 0
 			m.statusMsg = fmt.Sprintf("%d conflict(s) found", len(msg.Result.Conflicts))
 		} else {
-			// Success - show flash
-			total := msg.Result.MarkdownToDBCount + msg.Result.DBToMarkdownCount
-			if total > 0 {
-				m.syncFlash = fmt.Sprintf("Synced %d task(s) ✓", total)
+			// Success - reload tasks from database to update UI
+			if err := m.reloadTasksFromStore(); err != nil {
+				m.statusMsg = fmt.Sprintf("Sync succeeded but failed to reload: %v", err)
 			} else {
-				m.syncFlash = "Already in sync ✓"
+				// Show flash
+				total := msg.Result.MarkdownToDBCount + msg.Result.DBToMarkdownCount
+				if total > 0 {
+					m.syncFlash = fmt.Sprintf("Synced %d task(s) ✓", total)
+				} else {
+					m.syncFlash = "Already in sync ✓"
+				}
+				m.syncFlashExp = time.Now().Add(2 * time.Second)
+				m.statusMsg = ""
 			}
-			m.syncFlashExp = time.Now().Add(2 * time.Second)
-			m.statusMsg = ""
 		}
 		return m, nil
 
@@ -1052,11 +1057,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.statusMsg = fmt.Sprintf("Resolution failed: %v", msg.Err)
 		} else {
-			m.syncFlash = "Conflicts resolved ✓"
-			m.syncFlashExp = time.Now().Add(2 * time.Second)
-			m.statusMsg = ""
-			// Recompute module summaries
-			m.modules = computeModuleSummaries(m.allTasks)
+			// Reload tasks from database to update UI with resolved state
+			if err := m.reloadTasksFromStore(); err != nil {
+				m.statusMsg = fmt.Sprintf("Resolved but failed to reload: %v", err)
+			} else {
+				m.syncFlash = "Conflicts resolved ✓"
+				m.syncFlashExp = time.Now().Add(2 * time.Second)
+				m.statusMsg = ""
+			}
 		}
 		return m, nil
 
@@ -1217,6 +1225,43 @@ func (m *Model) SetTasks(tasks []*domain.Task) {
 // SetQueued updates the queued tasks list
 func (m *Model) SetQueued(tasks []*domain.Task) {
 	m.queued = tasks
+}
+
+// reloadTasksFromStore reloads all tasks from the database and updates derived state
+func (m *Model) reloadTasksFromStore() error {
+	if m.store == nil {
+		return fmt.Errorf("store is nil")
+	}
+
+	tasks, err := m.store.ListTasks(taskstore.ListOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Update allTasks
+	m.allTasks = tasks
+
+	// Rebuild completedTasks map
+	m.completedTasks = make(map[string]bool)
+	for _, t := range tasks {
+		if t.Status == domain.StatusComplete {
+			m.completedTasks[t.ID.String()] = true
+		}
+	}
+
+	// Rebuild queued (non-completed tasks)
+	var queued []*domain.Task
+	for _, t := range tasks {
+		if t.Status != domain.StatusComplete {
+			queued = append(queued, t)
+		}
+	}
+	m.queued = queued
+
+	// Recompute module summaries
+	m.modules = computeModuleSummaries(tasks)
+
+	return nil
 }
 
 // updateTestAgentOutput copies streaming output from the shared buffer to the test agent
