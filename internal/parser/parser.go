@@ -56,6 +56,7 @@ func ParseEpicFile(path string) (*domain.Task, error) {
 		Priority:    ToPriority(fm.Priority),
 		DependsOn:   deps,
 		NeedsReview: fm.NeedsReview,
+		GitHubIssue: fm.GitHubIssue,
 		FilePath:    path,
 		TestSummary: testSummary,
 		CreatedAt:   now,

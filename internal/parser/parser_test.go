@@ -171,6 +171,23 @@ func TestParseReadmeStatuses(t *testing.T) {
 	}
 }
 
+func TestParseFrontmatter_GitHubIssue(t *testing.T) {
+	content := []byte(`---
+status: not_started
+priority: medium
+github_issue: 42
+---
+# Test Epic
+`)
+	fm, _, err := ParseFrontmatter(content)
+	if err != nil {
+		t.Fatalf("ParseFrontmatter() error = %v", err)
+	}
+	if fm.GitHubIssue == nil || *fm.GitHubIssue != 42 {
+		t.Errorf("GitHubIssue = %v, want 42", fm.GitHubIssue)
+	}
+}
+
 func TestExtractTaskIDFromPath(t *testing.T) {
 	tests := []struct {
 		path       string

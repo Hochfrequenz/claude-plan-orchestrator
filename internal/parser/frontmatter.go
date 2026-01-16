@@ -13,6 +13,7 @@ type Frontmatter struct {
 	Priority    string   `yaml:"priority"`
 	DependsOn   []string `yaml:"depends_on"`
 	NeedsReview bool     `yaml:"needs_review"`
+	GitHubIssue *int     `yaml:"github_issue"`
 }
 
 // ParseFrontmatter extracts YAML frontmatter from markdown content
