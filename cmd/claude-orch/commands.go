@@ -419,6 +419,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 
 		// Create dispatcher with embedded worker
 		dispatcher := buildpool.NewDispatcher(registry, embeddedFunc)
+		dispatcher.SetLocalRepoPath(cfg.General.ProjectRoot)
 
 		// Create coordinator
 		buildPoolCoord = buildpool.NewCoordinator(buildpool.CoordinatorConfig{
@@ -726,6 +727,7 @@ func runBuildPoolStart(cmd *cobra.Command, args []string) error {
 
 	// Create dispatcher with embedded worker
 	dispatcher := buildpool.NewDispatcher(registry, embeddedFunc)
+	dispatcher.SetLocalRepoPath(cfg.General.ProjectRoot)
 
 	// Create coordinator
 	coord := buildpool.NewCoordinator(buildpool.CoordinatorConfig{

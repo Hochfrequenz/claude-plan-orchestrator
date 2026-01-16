@@ -187,12 +187,25 @@ func (e *Executor) createWorktree(jobID, repo, commit string) (string, error) {
 	suffix := randomSuffix()
 	wtPath := filepath.Join(e.config.WorktreeDir, fmt.Sprintf("job-%s-%s", jobID, suffix))
 
-	// For local repos (testing), just create worktree directly
+	// For local repos, auto-commit changes and use HEAD
 	if !strings.HasPrefix(repo, "git://") && !strings.HasPrefix(repo, "https://") {
 		if e.config.Debug {
-			log.Printf("[executor] local repo detected, creating worktree directly from %s", repo)
+			log.Printf("[executor] local repo detected, checking for uncommitted changes")
 		}
-		cmd := exec.Command("git", "worktree", "add", "--detach", wtPath, commit)
+
+		// Auto-commit any uncommitted changes so worktree can access them
+		if err := e.autoCommitChanges(repo); err != nil {
+			if e.config.Debug {
+				log.Printf("[executor] auto-commit skipped or failed: %v", err)
+			}
+			// Continue anyway - worktree creation might still work
+		}
+
+		// Use HEAD instead of passed commit (which may be stale)
+		if e.config.Debug {
+			log.Printf("[executor] creating worktree from HEAD at %s", repo)
+		}
+		cmd := exec.Command("git", "worktree", "add", "--detach", wtPath, "HEAD")
 		cmd.Dir = repo
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("git worktree add: %s: %w", out, err)
@@ -323,5 +336,55 @@ func (e *Executor) initGitCacheDir(dir string) error {
 		return fmt.Errorf("git init --bare: %s: %w", out, err)
 	}
 
+	return nil
+}
+
+// autoCommitChanges creates a WIP commit with any uncommitted changes
+// This allows worktrees to access the current working state
+func (e *Executor) autoCommitChanges(repoDir string) error {
+	// Check if there are any changes (staged, unstaged, or untracked)
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("git status: %w", err)
+	}
+
+	// No changes to commit
+	if len(out) == 0 {
+		if e.config.Debug {
+			log.Printf("[executor] no uncommitted changes to auto-commit")
+		}
+		return nil
+	}
+
+	if e.config.Debug {
+		log.Printf("[executor] found uncommitted changes, creating WIP commit")
+	}
+
+	// Add all changes (including untracked files)
+	cmd = exec.Command("git", "add", "-A")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %s: %w", out, err)
+	}
+
+	// Create WIP commit
+	cmd = exec.Command("git", "commit", "-m", "[WIP] Auto-commit for build-pool embedded worker", "--no-verify")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// Check if "nothing to commit" - this is okay
+		if strings.Contains(string(out), "nothing to commit") {
+			if e.config.Debug {
+				log.Printf("[executor] nothing to commit after git add")
+			}
+			return nil
+		}
+		return fmt.Errorf("git commit: %s: %w", out, err)
+	}
+
+	if e.config.Debug {
+		log.Printf("[executor] WIP commit created successfully")
+	}
 	return nil
 }
