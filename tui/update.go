@@ -147,6 +147,19 @@ type GroupPrioritiesMsg struct {
 	Error error
 }
 
+// SetGroupPriorityMsg reports result of setting a group priority
+type SetGroupPriorityMsg struct {
+	Group    string
+	Priority int
+	Error    error
+}
+
+// RemoveGroupPriorityMsg reports result of removing a group priority
+type RemoveGroupPriorityMsg struct {
+	Group string
+	Error error
+}
+
 // Update handles messages
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -279,6 +292,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			return m, nil // Consume all other keys when modal is open
+		}
+
+		// Handle group priorities view keys
+		if m.showGroupPriorities {
+			switch msg.String() {
+			case "j", "down":
+				if m.selectedPriorityRow < len(m.groupPriorityItems)-1 {
+					m.selectedPriorityRow++
+				}
+				return m, nil
+			case "k", "up":
+				if m.selectedPriorityRow > 0 {
+					m.selectedPriorityRow--
+				}
+				return m, nil
+			case "+", "=":
+				// Increase tier (lower priority)
+				if m.selectedPriorityRow < len(m.groupPriorityItems) {
+					item := &m.groupPriorityItems[m.selectedPriorityRow]
+					newPriority := item.Priority + 1
+					if item.Priority < 0 {
+						newPriority = 1 // Unassigned goes to tier 1
+					}
+					return m, setGroupPriorityCmd(m.store, item.Name, newPriority)
+				}
+				return m, nil
+			case "-", "_":
+				// Decrease tier (higher priority)
+				if m.selectedPriorityRow < len(m.groupPriorityItems) {
+					item := &m.groupPriorityItems[m.selectedPriorityRow]
+					newPriority := item.Priority - 1
+					if newPriority < 0 {
+						newPriority = 0
+					}
+					return m, setGroupPriorityCmd(m.store, item.Name, newPriority)
+				}
+				return m, nil
+			case "u":
+				// Unassign (remove from table)
+				if m.selectedPriorityRow < len(m.groupPriorityItems) {
+					item := m.groupPriorityItems[m.selectedPriorityRow]
+					return m, removeGroupPriorityCmd(m.store, item.Name)
+				}
+				return m, nil
+			case "g", "esc":
+				// Close priorities view
+				m.showGroupPriorities = false
+				return m, nil
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil // Consume all other keys when priorities view is open
 		}
 
 		switch msg.String() {
@@ -1027,6 +1092,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showGroupPriorities = false
 		} else {
 			m.groupPriorityItems = msg.Items
+		}
+		return m, nil
+
+	case SetGroupPriorityMsg:
+		if msg.Error != nil {
+			m.statusMsg = fmt.Sprintf("Failed to set priority: %v", msg.Error)
+		} else {
+			// Update local state
+			for i, item := range m.groupPriorityItems {
+				if item.Name == msg.Group {
+					m.groupPriorityItems[i].Priority = msg.Priority
+					break
+				}
+			}
+			m.statusMsg = fmt.Sprintf("Set %s to tier %d", msg.Group, msg.Priority)
+		}
+		return m, nil
+
+	case RemoveGroupPriorityMsg:
+		if msg.Error != nil {
+			m.statusMsg = fmt.Sprintf("Failed to unassign: %v", msg.Error)
+		} else {
+			// Update local state
+			for i, item := range m.groupPriorityItems {
+				if item.Name == msg.Group {
+					m.groupPriorityItems[i].Priority = -1
+					break
+				}
+			}
+			m.statusMsg = fmt.Sprintf("Unassigned %s (defaults to tier 0)", msg.Group)
 		}
 		return m, nil
 	}
@@ -1980,5 +2075,27 @@ func loadGroupPrioritiesCmd(store *taskstore.Store) tea.Cmd {
 		}
 
 		return GroupPrioritiesMsg{Items: items}
+	}
+}
+
+// setGroupPriorityCmd sets the priority tier for a group
+func setGroupPriorityCmd(store *taskstore.Store, group string, priority int) tea.Cmd {
+	return func() tea.Msg {
+		if store == nil {
+			return SetGroupPriorityMsg{Group: group, Error: fmt.Errorf("no database")}
+		}
+		err := store.SetGroupPriority(group, priority)
+		return SetGroupPriorityMsg{Group: group, Priority: priority, Error: err}
+	}
+}
+
+// removeGroupPriorityCmd removes a group from the priorities table
+func removeGroupPriorityCmd(store *taskstore.Store, group string) tea.Cmd {
+	return func() tea.Msg {
+		if store == nil {
+			return RemoveGroupPriorityMsg{Group: group, Error: fmt.Errorf("no database")}
+		}
+		err := store.RemoveGroupPriority(group)
+		return RemoveGroupPriorityMsg{Group: group, Error: err}
 	}
 }
