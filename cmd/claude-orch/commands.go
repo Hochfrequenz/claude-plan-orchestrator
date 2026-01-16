@@ -25,11 +25,12 @@ import (
 )
 
 var (
-	startCount  int
-	startModule string
-	listStatus  string
-	listModule  string
-	servePort   int
+	startCount   int
+	startModule  string
+	listStatus   string
+	listModule   string
+	listPriority int
+	servePort    int
 )
 
 func init() {
@@ -59,6 +60,7 @@ func init() {
 	}
 	listCmd.Flags().StringVar(&listStatus, "status", "", "filter by status")
 	listCmd.Flags().StringVar(&listModule, "module", "", "filter by module")
+	listCmd.Flags().IntVar(&listPriority, "priority", -1, "filter by priority tier")
 	rootCmd.AddCommand(listCmd)
 
 	// sync command
@@ -243,6 +245,23 @@ func runList(cmd *cobra.Command, args []string) error {
 	tasks, err := store.ListTasks(opts)
 	if err != nil {
 		return err
+	}
+
+	// If priority filter is set, load priorities and filter
+	if listPriority >= 0 {
+		priorities, err := store.GetGroupPriorities()
+		if err != nil {
+			return err
+		}
+
+		var filtered []*domain.Task
+		for _, t := range tasks {
+			taskPriority := priorities[t.ID.Module] // Defaults to 0 if not in map
+			if taskPriority == listPriority {
+				filtered = append(filtered, t)
+			}
+		}
+		tasks = filtered
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
