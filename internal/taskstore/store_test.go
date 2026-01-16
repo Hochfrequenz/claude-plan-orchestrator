@@ -215,6 +215,34 @@ func TestRemoveGroupPriority(t *testing.T) {
 	}
 }
 
+func TestStore_GitHubIssuesTableExists(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Check table exists by attempting a query
+	_, err = store.db.Exec("SELECT issue_number FROM github_issues LIMIT 1")
+	if err != nil {
+		t.Errorf("github_issues table should exist: %v", err)
+	}
+}
+
+func TestStore_TasksGitHubIssueColumn(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Check column exists
+	_, err = store.db.Exec("SELECT github_issue FROM tasks LIMIT 1")
+	if err != nil {
+		t.Errorf("tasks.github_issue column should exist: %v", err)
+	}
+}
+
 func TestGetGroupsWithTaskCounts(t *testing.T) {
 	store, err := New(":memory:")
 	if err != nil {

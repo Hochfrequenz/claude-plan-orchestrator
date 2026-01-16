@@ -41,6 +41,14 @@ func New(dbPath string) (*Store, error) {
 	// Run additional migrations (ignore errors for already-applied migrations)
 	db.Exec(migrationAddSessionID)
 
+	// Run github_issues migration
+	if _, err := db.Exec(migrationGitHubIssues); err != nil {
+		return nil, fmt.Errorf("github_issues migration: %w", err)
+	}
+
+	// Add github_issue column to tasks (ignore error if already exists)
+	db.Exec(migrationTasksGitHubIssue)
+
 	return &Store{db: db}, nil
 }
 

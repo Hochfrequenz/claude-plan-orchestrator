@@ -95,3 +95,25 @@ CREATE INDEX IF NOT EXISTS idx_group_priorities_priority ON group_priorities(pri
 const migrationAddSessionID = `
 ALTER TABLE agent_runs ADD COLUMN session_id TEXT;
 `
+
+// Migration to add github_issues table for tracking GitHub issues
+const migrationGitHubIssues = `
+CREATE TABLE IF NOT EXISTS github_issues (
+    issue_number  INTEGER PRIMARY KEY,
+    repo          TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    group_name    TEXT,
+    analyzed_at   TIMESTAMP,
+    plan_path     TEXT,
+    closed_at     TIMESTAMP,
+    pr_number     INTEGER,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+`
+
+// Migration to add github_issue column to tasks table
+const migrationTasksGitHubIssue = `
+ALTER TABLE tasks ADD COLUMN github_issue INTEGER REFERENCES github_issues(issue_number);
+`
