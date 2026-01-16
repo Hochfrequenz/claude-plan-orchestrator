@@ -606,6 +606,37 @@ func (s *Store) MarkIssueClosed(issueNumber int, prNumber int) error {
 	return err
 }
 
+// ListGitHubIssues returns all tracked GitHub issues ordered by issue number descending
+func (s *Store) ListGitHubIssues() ([]*domain.GitHubIssue, error) {
+	rows, err := s.db.Query(`
+		SELECT issue_number, repo, title, status, group_name, analyzed_at, plan_path, closed_at, pr_number, created_at, updated_at
+		FROM github_issues ORDER BY issue_number DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var issues []*domain.GitHubIssue
+	for rows.Next() {
+		var issue domain.GitHubIssue
+		var status string
+		var groupName sql.NullString
+		var analyzedAt sql.NullTime
+		var planPath sql.NullString
+		var closedAt sql.NullTime
+		var prNumber sql.NullInt64
+
+		if err := rows.Scan(&issue.IssueNumber, &issue.Repo, &issue.Title, &status, &groupName,
+			&analyzedAt, &planPath, &closedAt, &prNumber, &issue.CreatedAt, &issue.UpdatedAt); err != nil {
+			return nil, err
+		}
+		scanGitHubIssue(&issue, status, groupName, analyzedAt, planPath, closedAt, prNumber)
+		issues = append(issues, &issue)
+	}
+	return issues, rows.Err()
+}
+
 // GetIncompleteEpicsForIssue returns all tasks linked to a GitHub issue that are not complete
 func (s *Store) GetIncompleteEpicsForIssue(issueNumber int) ([]*domain.Task, error) {
 	rows, err := s.db.Query(`

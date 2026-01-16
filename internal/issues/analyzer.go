@@ -112,6 +112,11 @@ func (a *Analyzer) AnalyzeCandidates(ctx context.Context, maxParallel int) error
 	return nil
 }
 
+// AnalyzeOne analyzes a single issue (for manual triggering).
+func (a *Analyzer) AnalyzeOne(ctx context.Context, issue *domain.GitHubIssue) error {
+	return a.analyzeIssue(ctx, issue)
+}
+
 func (a *Analyzer) analyzeIssue(ctx context.Context, issue *domain.GitHubIssue) error {
 	// Save as pending
 	issue.Status = domain.IssuePending
