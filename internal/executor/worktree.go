@@ -46,8 +46,14 @@ func (m *WorktreeManager) Create(taskID domain.TaskID) (string, error) {
 	// Generate unique suffix
 	suffix := randomSuffix()
 
-	// Worktree path
-	dirName := fmt.Sprintf("%s-E%02d-%s", taskID.Module, taskID.EpicNum, suffix)
+	// Worktree path - include prefix if present (e.g., CLI02 vs E02)
+	var epicPart string
+	if taskID.Prefix != "" {
+		epicPart = fmt.Sprintf("%s%02d", taskID.Prefix, taskID.EpicNum)
+	} else {
+		epicPart = fmt.Sprintf("E%02d", taskID.EpicNum)
+	}
+	dirName := fmt.Sprintf("%s-%s-%s", taskID.Module, epicPart, suffix)
 	wtPath := filepath.Join(m.worktreeDir, dirName)
 
 	// Fetch latest from origin first (if remote exists)
@@ -162,6 +168,10 @@ func (m *WorktreeManager) List() ([]string, error) {
 
 // BranchName returns the branch name for a task
 func BranchName(taskID domain.TaskID) string {
+	// Include prefix if present (e.g., feat/module-CLI02 vs feat/module-E02)
+	if taskID.Prefix != "" {
+		return fmt.Sprintf("feat/%s-%s%02d", taskID.Module, taskID.Prefix, taskID.EpicNum)
+	}
 	return fmt.Sprintf("feat/%s-E%02d", taskID.Module, taskID.EpicNum)
 }
 

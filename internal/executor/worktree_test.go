@@ -92,8 +92,13 @@ func TestWorktreeManager_BranchName(t *testing.T) {
 		taskID domain.TaskID
 		want   string
 	}{
+		// Standard epics without prefix
 		{domain.TaskID{Module: "technical", EpicNum: 5}, "feat/technical-E05"},
 		{domain.TaskID{Module: "billing", EpicNum: 0}, "feat/billing-E00"},
+		// Epics with subsystem prefix
+		{domain.TaskID{Module: "cli-tui-impl", Prefix: "CLI", EpicNum: 2}, "feat/cli-tui-impl-CLI02"},
+		{domain.TaskID{Module: "cli-tui-impl", Prefix: "TUI", EpicNum: 7}, "feat/cli-tui-impl-TUI07"},
+		{domain.TaskID{Module: "api-module", Prefix: "API", EpicNum: 0}, "feat/api-module-API00"},
 	}
 
 	for _, tt := range tests {
