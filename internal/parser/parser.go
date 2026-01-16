@@ -180,13 +180,12 @@ func ParseReadmeStatuses(plansDir string) map[string]domain.TaskStatus {
 	statuses := make(map[string]domain.TaskStatus)
 
 	// Try README.md at various levels relative to plansDir
-	// plansDir is typically docs/plans, so we need to go up two levels to repo root
-	docsDir := filepath.Dir(plansDir)                // docs/
-	repoRoot := filepath.Dir(docsDir)                // repo root
+	docsDir := filepath.Dir(plansDir)
+	repoRoot := filepath.Dir(docsDir)
 	readmePaths := []string{
-		filepath.Join(repoRoot, "README.md"),        // repo root (most common)
-		filepath.Join(docsDir, "README.md"),         // docs/
-		filepath.Join(plansDir, "README.md"),        // docs/plans/
+		filepath.Join(repoRoot, "README.md"),
+		filepath.Join(docsDir, "README.md"),
+		filepath.Join(plansDir, "README.md"),
 	}
 
 	var content []byte
@@ -203,21 +202,13 @@ func ParseReadmeStatuses(plansDir string) map[string]domain.TaskStatus {
 
 	lines := strings.Split(string(content), "\n")
 
-	// Patterns to extract module from epic file path and status emoji
-	// Pattern 1: | [E01](docs/plans/technical-module/epic-01-xxx.md) | Desc | 🟢 |
-	epicStandardRegex := regexp.MustCompile(`\|\s*\[E(\d+)\]\([^)]*?([a-z][a-z0-9-]*)-module/epic-(\d+)-[^)]+\.md\)`)
+	// Pattern 1: Directory-based paths like group/epic-##-name.md or group/YYYY-MM-DD-...-epic-##-name.md
+	// Captures: group name (directory) and epic number
+	epicDirRegex := regexp.MustCompile(`\|\s*\[E(\d+)\]\([^)]*?/([a-z][a-z0-9-]*)/(?:\d{4}-\d{2}-\d{2}-[a-z0-9-]*-)?epic-(\d+)-[^)]+\.md\)`)
 
-	// Pattern 2: | [E1](docs/plans/2026-01-05-subledger-epic-1-xxx.md) | Desc | 🟢 |
-	// Also matches: | [E00](docs/plans/2026-01-07-task-module-epic-0-xxx.md) | Desc | 🟢 |
-	epicDatePrefixRegex := regexp.MustCompile(`\|\s*\[E(\d+)\]\([^)]*?\d{4}-\d{2}-\d{2}-([a-z][a-z0-9-]*(?:-module)?)-epic-(\d+)-[^)]+\.md\)`)
-
-	// Pattern 3: | [E03](docs/plans/task-module/2026-01-07-task-module-epic-3-xxx.md) | Desc | 🟢 |
-	// Nested: module directory + date-prefixed file
-	epicNestedDateRegex := regexp.MustCompile(`\|\s*\[E(\d+)\]\([^)]*?([a-z][a-z0-9-]*)-module/\d{4}-\d{2}-\d{2}-[a-z][a-z0-9-]*-epic-(\d+)-[^)]+\.md\)`)
-
-	// Pattern 4: | [E1](docs/plans/testing-strategy/epic-01-xxx.md) | Desc | 🟢 |
-	// Non-module directories (testing-strategy, workflow-module without standard naming)
-	epicNonModuleRegex := regexp.MustCompile(`\|\s*\[E(\d+)\]\([^)]*?([a-z][a-z0-9-]+)/epic-(\d+)-[^)]+\.md\)`)
+	// Pattern 2: Date-prefixed files directly in plans/ like YYYY-MM-DD-module-epic-##-name.md
+	// Captures: module name from filename and epic number
+	epicDatePrefixRegex := regexp.MustCompile(`\|\s*\[E(\d+)\]\([^)]*?/\d{4}-\d{2}-\d{2}-([a-z][a-z0-9-]*)-epic-(\d+)-[^)]+\.md\)`)
 
 	for _, line := range lines {
 		// Skip lines without status emoji
@@ -225,46 +216,36 @@ func ParseReadmeStatuses(plansDir string) map[string]domain.TaskStatus {
 			continue
 		}
 
-		var module string
+		var group string
 		var epicNum int
 
-		// Try patterns in order of specificity
-		if matches := epicStandardRegex.FindStringSubmatch(line); matches != nil {
-			// Standard: xxx-module/epic-NN-... -> module = xxx
+		// Try date-prefix pattern first (files directly in plans/ without subdirectory)
+		// This must come first because the directory pattern would incorrectly match "plans" as the group
+		if matches := epicDatePrefixRegex.FindStringSubmatch(line); matches != nil {
 			epicNum, _ = strconv.Atoi(matches[3])
-			module = matches[2]
-		} else if matches := epicNestedDateRegex.FindStringSubmatch(line); matches != nil {
-			// Nested date: xxx-module/YYYY-MM-DD-...-epic-N-... -> module = xxx
+			group = matches[2]
+		} else if matches := epicDirRegex.FindStringSubmatch(line); matches != nil {
+			// Directory-based pattern: group/epic-##-name.md
 			epicNum, _ = strconv.Atoi(matches[3])
-			module = matches[2]
-		} else if matches := epicDatePrefixRegex.FindStringSubmatch(line); matches != nil {
-			// Date prefix: YYYY-MM-DD-xxx-epic-N-... or YYYY-MM-DD-xxx-module-epic-N-...
-			epicNum, _ = strconv.Atoi(matches[3])
-			module = matches[2]
-			// Strip -module suffix if present to normalize
-			module = strings.TrimSuffix(module, "-module")
-		} else if matches := epicNonModuleRegex.FindStringSubmatch(line); matches != nil {
-			// Non-module directory: xxx/epic-NN-...
-			epicNum, _ = strconv.Atoi(matches[3])
-			module = matches[2]
+			group = matches[2]
 		}
 
-		if module == "" {
+		if group == "" {
 			continue
 		}
 
 		// Extract the emoji
-		var emoji string
+		var status domain.TaskStatus
 		if strings.Contains(line, "🟢") {
-			emoji = "🟢"
+			status = domain.StatusComplete
 		} else if strings.Contains(line, "🟡") {
-			emoji = "🟡"
-		} else if strings.Contains(line, "🔴") {
-			emoji = "🔴"
+			status = domain.StatusInProgress
+		} else {
+			status = domain.StatusNotStarted
 		}
 
-		taskID := domain.TaskID{Module: module, EpicNum: epicNum}
-		statuses[taskID.String()] = emojiToStatus(emoji)
+		taskID := domain.TaskID{Module: group, EpicNum: epicNum}
+		statuses[taskID.String()] = status
 	}
 
 	return statuses

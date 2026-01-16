@@ -138,6 +138,39 @@ func TestParseModuleDir_MissingPredecessor(t *testing.T) {
 	}
 }
 
+func TestParseReadmeStatuses(t *testing.T) {
+	dir := t.TempDir()
+	plansDir := filepath.Join(dir, "docs", "plans")
+	os.MkdirAll(plansDir, 0755)
+
+	// Create README at repo root
+	readme := `# Project
+| Epic | Description | Status |
+|------|-------------|--------|
+| [E00](docs/plans/billing/epic-00-setup.md) | Setup | 🟢 |
+| [E01](docs/plans/auth-feature/epic-01-login.md) | Login | 🟡 |
+| [E02](docs/plans/api-v2/epic-02-endpoints.md) | API | 🔴 |
+`
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte(readme), 0644)
+
+	statuses := ParseReadmeStatuses(plansDir)
+
+	tests := []struct {
+		taskID string
+		want   domain.TaskStatus
+	}{
+		{"billing/E00", domain.StatusComplete},
+		{"auth-feature/E01", domain.StatusInProgress},
+		{"api-v2/E02", domain.StatusNotStarted},
+	}
+
+	for _, tt := range tests {
+		if got := statuses[tt.taskID]; got != tt.want {
+			t.Errorf("statuses[%q] = %v, want %v", tt.taskID, got, tt.want)
+		}
+	}
+}
+
 func TestExtractTaskIDFromPath(t *testing.T) {
 	tests := []struct {
 		path       string

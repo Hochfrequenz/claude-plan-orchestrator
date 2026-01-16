@@ -74,29 +74,29 @@ Status: 🔴 Not Started | 🟡 In Progress | 🟢 Complete
 	// Parse statuses
 	statuses := ParseReadmeStatuses(plansDir)
 
-	// Expected results - modules should match how ExtractTaskIDFromPath would parse them
+	// Expected results - directory names are used as-is (no -module suffix stripping)
 	expected := map[string]domain.TaskStatus{
 		// Technical module (standard xxx-module/epic-NN-... pattern)
-		"technical/E00": domain.StatusComplete,
-		"technical/E01": domain.StatusComplete,
-		"technical/E02": domain.StatusComplete,
-		"technical/E05": domain.StatusNotStarted,
-		"technical/E06": domain.StatusInProgress,
+		"technical-module/E00": domain.StatusComplete,
+		"technical-module/E01": domain.StatusComplete,
+		"technical-module/E02": domain.StatusComplete,
+		"technical-module/E05": domain.StatusNotStarted,
+		"technical-module/E06": domain.StatusInProgress,
 
-		// SubLedger module (YYYY-MM-DD-xxx-epic-N-... pattern)
+		// SubLedger module (YYYY-MM-DD-xxx-epic-N-... pattern - no directory)
 		"subledger/E01": domain.StatusComplete,
 		"subledger/E02": domain.StatusComplete,
 		"subledger/E03": domain.StatusNotStarted,
 
 		// Customer module (standard xxx-module/epic-NN-... pattern)
-		"customer/E00": domain.StatusComplete,
-		"customer/E01": domain.StatusComplete,
-		"customer/E05": domain.StatusNotStarted,
+		"customer-module/E00": domain.StatusComplete,
+		"customer-module/E01": domain.StatusComplete,
+		"customer-module/E05": domain.StatusNotStarted,
 
-		// Task module (YYYY-MM-DD-task-module-epic-N-... pattern -> task)
-		"task/E00": domain.StatusComplete,
-		"task/E01": domain.StatusComplete,
-		"task/E03": domain.StatusComplete, // nested path
+		// Task module (YYYY-MM-DD-task-module-epic-N-... pattern)
+		"task-module/E00": domain.StatusComplete,
+		"task-module/E01": domain.StatusComplete,
+		"task-module/E03": domain.StatusComplete, // nested path: task-module/YYYY-MM-DD-...-epic-3-...
 
 		// Testing strategy (non-module directory)
 		"testing-strategy/E01": domain.StatusComplete,
@@ -135,6 +135,7 @@ Status: 🔴 Not Started | 🟡 In Progress | 🟢 Complete
 }
 
 func TestParseReadmeStatuses_IndividualPatterns(t *testing.T) {
+	// Note: Directory names are used as-is (no -module suffix stripping)
 	tests := []struct {
 		name       string
 		line       string
@@ -145,14 +146,14 @@ func TestParseReadmeStatuses_IndividualPatterns(t *testing.T) {
 		{
 			name:       "standard xxx-module pattern",
 			line:       "| [E00](docs/plans/technical-module/epic-00-scaffolding.md) | Project Scaffolding | 🟢 |",
-			wantModule: "technical",
+			wantModule: "technical-module",
 			wantEpic:   0,
 			wantStatus: domain.StatusComplete,
 		},
 		{
 			name:       "standard xxx-module pattern with E05",
 			line:       "| [E05](docs/plans/customer-module/epic-05-http-api.md) | HTTP API Wiring | 🔴 |",
-			wantModule: "customer",
+			wantModule: "customer-module",
 			wantEpic:   5,
 			wantStatus: domain.StatusNotStarted,
 		},
@@ -166,21 +167,21 @@ func TestParseReadmeStatuses_IndividualPatterns(t *testing.T) {
 		{
 			name:       "date prefix task-module",
 			line:       "| [E00](docs/plans/2026-01-07-task-module-epic-0-scaffolding.md) | Module Scaffolding | 🟢 |",
-			wantModule: "task",
+			wantModule: "task-module",
 			wantEpic:   0,
 			wantStatus: domain.StatusComplete,
 		},
 		{
 			name:       "nested task-module with date prefix file",
 			line:       "| [E03](docs/plans/task-module/2026-01-07-task-module-epic-3-task-types-sla.md) | Task Types and SLA | 🟢 |",
-			wantModule: "task",
+			wantModule: "task-module",
 			wantEpic:   3,
 			wantStatus: domain.StatusComplete,
 		},
 		{
 			name:       "in progress status",
 			line:       "| [E06](docs/plans/technical-module/epic-06-formula-engine.md) | Formula Engine | 🟡 |",
-			wantModule: "technical",
+			wantModule: "technical-module",
 			wantEpic:   6,
 			wantStatus: domain.StatusInProgress,
 		},
@@ -194,7 +195,7 @@ func TestParseReadmeStatuses_IndividualPatterns(t *testing.T) {
 		{
 			name:       "workflow-module standard",
 			line:       "| [E00](docs/plans/workflow-module/epic-00-scaffolding.md) | Module Scaffolding | 🟢 |",
-			wantModule: "workflow",
+			wantModule: "workflow-module",
 			wantEpic:   0,
 			wantStatus: domain.StatusComplete,
 		},
@@ -260,12 +261,12 @@ func TestParseReadmeStatuses_RealEnergyERPReadme(t *testing.T) {
 		t.Error("Failed to parse any statuses from real README")
 	}
 
-	// Check some known statuses from the README
+	// Check some known statuses from the README (directory names used as-is)
 	expectedComplete := []string{
-		"technical/E00", // Project Scaffolding
-		"technical/E01", // Supporting Entities
-		"subledger/E01", // Core Foundation
-		"customer/E00",  // Database Migrations
+		"technical-module/E00", // Project Scaffolding
+		"technical-module/E01", // Supporting Entities
+		"subledger/E01",        // Core Foundation (date-prefix pattern)
+		"customer-module/E00",  // Database Migrations
 	}
 
 	for _, taskID := range expectedComplete {
