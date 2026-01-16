@@ -81,14 +81,31 @@ internal/
 
 ### Task Model
 
-Tasks are identified as `{module}/E{number}` (e.g., `technical/E05`). Dependencies are:
-- **Implicit**: Within a module, E{N} depends on E{N-1}
+Tasks are identified as `{group}/E{number}` (e.g., `billing/E05`, `auth-feature/E01`).
+Groups can represent modules, subsystems, features, or any logical grouping.
+
+Directory structure:
+```
+docs/plans/
+├── billing/              # Simple group
+│   ├── epic-00-setup.md
+│   └── epic-01-invoicing.md
+├── auth-subsystem/       # Subsystem
+│   └── epic-00-login.md
+├── payment-feature/      # Cross-cutting feature
+│   └── epic-00-checkout.md
+└── api-v2-migration/     # Migration project
+    └── epic-00-prep.md
+```
+
+Dependencies are:
+- **Implicit**: Within a group, E{N} depends on E{N-1}
 - **Explicit**: From frontmatter `depends_on` field
-- **Cross-module**: Parsed from doc content
+- **Cross-group**: Parsed from frontmatter
 
 ### Agent Lifecycle
 
-1. Create worktree from `main` → branch `feat/{module}-E{nn}`
+1. Create worktree from `main` → branch `feat/{group}-E{nn}`
 2. Start Claude Code with task prompt containing epic content
 3. Agent implements and runs tests via MCP
 4. Create PR, semantic analysis determines review routing
@@ -118,10 +135,10 @@ Schedule config at `~/.config/claude-orchestrator/schedule.toml` for batch runs.
 ## CLI Commands
 
 ```bash
-claude-orch start [--count N] [--module M] [TASK...]  # Start tasks
+claude-orch start [--count N] [--group G] [TASK...]   # Start tasks (filter by group)
 claude-orch stop [TASK...]                            # Stop tasks gracefully
 claude-orch status                                     # Show status summary
-claude-orch list [--status S] [--module M]            # List tasks
+claude-orch list [--status S] [--group G]             # List tasks (filter by group)
 claude-orch logs TASK                                  # View task logs
 claude-orch sync                                       # Re-parse markdown, sync state
 claude-orch tui                                        # Launch TUI dashboard
