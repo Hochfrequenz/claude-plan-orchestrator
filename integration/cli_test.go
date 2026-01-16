@@ -179,7 +179,7 @@ func TestCLI_List(t *testing.T) {
 	output := string(out)
 
 	// Verify output contains expected tasks
-	expectedTasks := []string{"test/E00", "test/E01", "test/E02", "billing/E00", "billing/E01"}
+	expectedTasks := []string{"testing/E00", "testing/E01", "testing/E02", "billing/E00", "billing/E01"}
 	for _, taskID := range expectedTasks {
 		if !strings.Contains(output, taskID) {
 			t.Errorf("Expected task %s in output, got: %s", taskID, output)
@@ -226,9 +226,9 @@ func TestCLI_ListWithModuleFilter(t *testing.T) {
 		t.Errorf("Expected billing/E00 in output, got: %s", output)
 	}
 
-	// Should NOT contain test tasks
-	if strings.Contains(output, "test/E00") {
-		t.Errorf("Did not expect test/E00 in output, got: %s", output)
+	// Should NOT contain testing tasks
+	if strings.Contains(output, "testing/E00") {
+		t.Errorf("Did not expect testing/E00 in output, got: %s", output)
 	}
 }
 
@@ -261,9 +261,9 @@ func TestCLI_ListWithStatusFilter(t *testing.T) {
 
 	output := string(out)
 
-	// Should contain complete tasks (test/E00 and billing/E00)
-	if !strings.Contains(output, "test/E00") {
-		t.Errorf("Expected test/E00 (complete) in output, got: %s", output)
+	// Should contain complete tasks (testing/E00 and billing/E00)
+	if !strings.Contains(output, "testing/E00") {
+		t.Errorf("Expected testing/E00 (complete) in output, got: %s", output)
 	}
 
 	if !strings.Contains(output, "billing/E00") {
@@ -271,8 +271,8 @@ func TestCLI_ListWithStatusFilter(t *testing.T) {
 	}
 
 	// Should NOT contain not_started tasks
-	if strings.Contains(output, "test/E02") {
-		t.Errorf("Did not expect test/E02 (not_started) in output, got: %s", output)
+	if strings.Contains(output, "testing/E02") {
+		t.Errorf("Did not expect testing/E02 (not_started) in output, got: %s", output)
 	}
 }
 
