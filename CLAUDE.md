@@ -119,6 +119,26 @@ PRs are auto-merged unless changes touch:
 - **architecture**: Core modules, new dependencies, public API
 - **migrations**: Database schema changes
 
+### Group Priorities
+
+Groups can be assigned to priority tiers to control execution order. Groups in lower tiers must complete all tasks before groups in higher tiers start.
+
+**TUI Controls:**
+- Press `g` on Dashboard or Modules tab to open Group Priorities view
+- `↑/↓` to navigate between groups
+- `+/-` to change a group's priority tier
+- `u` to unassign (defaults to tier 0)
+- `g` or `esc` to close the view
+
+**Example:**
+```
+Tier 0: auth (runs first)
+Tier 1: billing, reporting (run in parallel after auth completes)
+Tier 2: analytics (runs last)
+```
+
+Groups not explicitly assigned default to tier 0.
+
 ## Database
 
 SQLite with tables: `tasks`, `runs`, `logs`, `prs`, `batches`. Runs track worktree paths, token usage, and duration. PRs track review status through to merge.
@@ -138,7 +158,7 @@ Schedule config at `~/.config/claude-orchestrator/schedule.toml` for batch runs.
 claude-orch start [--count N] [--group G] [TASK...]   # Start tasks (filter by group)
 claude-orch stop [TASK...]                            # Stop tasks gracefully
 claude-orch status                                     # Show status summary
-claude-orch list [--status S] [--group G]             # List tasks (filter by group)
+claude-orch list [--status S] [--group G] [--priority P]  # List tasks (filter by priority tier)
 claude-orch logs TASK                                  # View task logs
 claude-orch sync                                       # Re-parse markdown, sync state
 claude-orch tui                                        # Launch TUI dashboard
