@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -1103,6 +1104,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showGroupPriorities = false
 		} else {
 			m.groupPriorityItems = msg.Items
+			// Sort items to match display order: by tier ascending, unassigned (-1) at end
+			sort.Slice(m.groupPriorityItems, func(i, j int) bool {
+				pi, pj := m.groupPriorityItems[i].Priority, m.groupPriorityItems[j].Priority
+				// Unassigned (-1) goes to the end
+				if pi < 0 && pj >= 0 {
+					return false
+				}
+				if pj < 0 && pi >= 0 {
+					return true
+				}
+				// Both unassigned or both assigned: sort by priority
+				return pi < pj
+			})
 		}
 		return m, nil
 
@@ -1110,10 +1124,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Error != nil {
 			m.statusMsg = fmt.Sprintf("Failed to set priority: %v", msg.Error)
 		} else {
-			// Update local state
+			// Update local state and re-sort to match display order
+			var selectedName string
+			if m.selectedPriorityRow < len(m.groupPriorityItems) {
+				selectedName = m.groupPriorityItems[m.selectedPriorityRow].Name
+			}
 			for i, item := range m.groupPriorityItems {
 				if item.Name == msg.Group {
 					m.groupPriorityItems[i].Priority = msg.Priority
+					break
+				}
+			}
+			// Re-sort items to match display order
+			sort.Slice(m.groupPriorityItems, func(i, j int) bool {
+				pi, pj := m.groupPriorityItems[i].Priority, m.groupPriorityItems[j].Priority
+				if pi < 0 && pj >= 0 {
+					return false
+				}
+				if pj < 0 && pi >= 0 {
+					return true
+				}
+				return pi < pj
+			})
+			// Update selectedPriorityRow to follow the item
+			for i, item := range m.groupPriorityItems {
+				if item.Name == selectedName {
+					m.selectedPriorityRow = i
 					break
 				}
 			}
@@ -1125,10 +1161,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Error != nil {
 			m.statusMsg = fmt.Sprintf("Failed to unassign: %v", msg.Error)
 		} else {
-			// Update local state
+			// Update local state and re-sort to match display order
+			var selectedName string
+			if m.selectedPriorityRow < len(m.groupPriorityItems) {
+				selectedName = m.groupPriorityItems[m.selectedPriorityRow].Name
+			}
 			for i, item := range m.groupPriorityItems {
 				if item.Name == msg.Group {
 					m.groupPriorityItems[i].Priority = -1
+					break
+				}
+			}
+			// Re-sort items to match display order
+			sort.Slice(m.groupPriorityItems, func(i, j int) bool {
+				pi, pj := m.groupPriorityItems[i].Priority, m.groupPriorityItems[j].Priority
+				if pi < 0 && pj >= 0 {
+					return false
+				}
+				if pj < 0 && pi >= 0 {
+					return true
+				}
+				return pi < pj
+			})
+			// Update selectedPriorityRow to follow the item
+			for i, item := range m.groupPriorityItems {
+				if item.Name == selectedName {
+					m.selectedPriorityRow = i
 					break
 				}
 			}
