@@ -424,8 +424,19 @@ func (m Model) renderQueued() string {
 		}
 	}
 
+	// Load group priorities from store if available
+	var groupPriorities map[string]int
+	if m.store != nil {
+		groupPriorities, _ = m.store.GetGroupPriorities()
+	}
+
 	// Use scheduler to get tasks in priority order, respecting dependencies
-	sched := scheduler.New(m.queued, m.completedTasks)
+	var sched *scheduler.Scheduler
+	if len(groupPriorities) > 0 {
+		sched = scheduler.NewWithPriorities(m.queued, m.completedTasks, groupPriorities)
+	} else {
+		sched = scheduler.New(m.queued, m.completedTasks)
+	}
 	readyTasks := sched.GetReadyTasksExcluding(len(m.queued), inProgress)
 
 	// Build a set of ready task IDs for quick lookup

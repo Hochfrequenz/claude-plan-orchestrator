@@ -574,8 +574,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 
+					// Load group priorities from store if available
+					var groupPriorities map[string]int
+					if m.store != nil {
+						groupPriorities, _ = m.store.GetGroupPriorities()
+					}
+
 					// Use scheduler to select tasks that don't conflict with running agents
-					sched := scheduler.New(m.queued, m.completedTasks)
+					var sched *scheduler.Scheduler
+					if len(groupPriorities) > 0 {
+						sched = scheduler.NewWithPriorities(m.queued, m.completedTasks, groupPriorities)
+					} else {
+						sched = scheduler.New(m.queued, m.completedTasks)
+					}
 					readyTasks := sched.GetReadyTasksExcluding(slotsAvailable, inProgress)
 
 					if len(readyTasks) > 0 {
@@ -1875,8 +1886,19 @@ func (m *Model) tryStartAutoTasks() tea.Cmd {
 		}
 	}
 
+	// Load group priorities from store if available
+	var groupPriorities map[string]int
+	if m.store != nil {
+		groupPriorities, _ = m.store.GetGroupPriorities()
+	}
+
 	// Use scheduler to select tasks that don't conflict with running agents
-	sched := scheduler.New(m.queued, m.completedTasks)
+	var sched *scheduler.Scheduler
+	if len(groupPriorities) > 0 {
+		sched = scheduler.NewWithPriorities(m.queued, m.completedTasks, groupPriorities)
+	} else {
+		sched = scheduler.New(m.queued, m.completedTasks)
+	}
 	readyTasks := sched.GetReadyTasksExcluding(slotsAvailable, inProgress)
 
 	if len(readyTasks) == 0 {
