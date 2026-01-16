@@ -738,8 +738,14 @@ func (m Model) formatTaskLine(task *domain.Task) string {
 		prioStr = " "
 	}
 
-	line := fmt.Sprintf("  %s %s %-15s %-30s",
-		statusIcon, prioStr, task.ID.String(), truncate(task.Title, 30))
+	// Issue indicator
+	var issueStr string
+	if task.GitHubIssue != nil {
+		issueStr = fmt.Sprintf(" #%d", *task.GitHubIssue)
+	}
+
+	line := fmt.Sprintf("  %s %s %-15s%-4s %-30s",
+		statusIcon, prioStr, task.ID.String(), issueStr, truncate(task.Title, 30))
 
 	return style.Render(line)
 }
