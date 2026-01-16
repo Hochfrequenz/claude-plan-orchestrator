@@ -51,6 +51,7 @@ type Task struct {
 	NeedsReview bool
 	FilePath    string
 	TestSummary *TestSummary
+	GitHubIssue *int // Source GitHub issue number, nil if not from issue
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -75,4 +76,9 @@ func (t *Task) ImplicitDependency() *TaskID {
 	}
 	dep := TaskID{Module: t.ID.Module, EpicNum: t.ID.EpicNum - 1}
 	return &dep
+}
+
+// HasGitHubIssue returns true if this task originated from a GitHub issue.
+func (t *Task) HasGitHubIssue() bool {
+	return t.GitHubIssue != nil
 }

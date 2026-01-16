@@ -62,3 +62,16 @@ func TestTask_IsReady(t *testing.T) {
 		t.Error("Task should not be ready when dependencies are incomplete")
 	}
 }
+
+func TestTask_HasGitHubIssue(t *testing.T) {
+	issueNum := 42
+	taskWithIssue := Task{GitHubIssue: &issueNum}
+	taskWithoutIssue := Task{}
+
+	if !taskWithIssue.HasGitHubIssue() {
+		t.Error("expected HasGitHubIssue() = true for task with issue")
+	}
+	if taskWithoutIssue.HasGitHubIssue() {
+		t.Error("expected HasGitHubIssue() = false for task without issue")
+	}
+}
