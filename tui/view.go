@@ -514,6 +514,10 @@ func (m Model) renderQueued() string {
 			if blocking == "" && inProgress[task.ID.String()] {
 				blocking = "in progress"
 			}
+			if blocking == "" && task.Status == domain.StatusInProgress {
+				// Task has in_progress status but no running agent - likely failed/stalled
+				blocking = "stalled (reset needed)"
+			}
 			if blocking == "" {
 				// Blocked by implicit module dependency or in-progress task
 				blocking = "dependency"
