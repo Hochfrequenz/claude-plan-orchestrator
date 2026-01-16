@@ -188,13 +188,14 @@ func (s *Server) batchStartHandler() http.HandlerFunc {
 		s.batchMu.Lock()
 		s.batchRunning = true
 		s.batchPaused = false
-		s.batchMu.Unlock()
-
-		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+		resp := BatchStatusResponse{
 			Running: true,
 			Paused:  false,
 			Auto:    s.autoMode,
-		}})
+		}
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: resp})
 
 		writeJSON(w, map[string]string{"status": "started"})
 	}
@@ -210,13 +211,14 @@ func (s *Server) batchStopHandler() http.HandlerFunc {
 		s.batchMu.Lock()
 		s.batchRunning = false
 		s.batchPaused = false
-		s.batchMu.Unlock()
-
-		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+		resp := BatchStatusResponse{
 			Running: false,
 			Paused:  false,
 			Auto:    s.autoMode,
-		}})
+		}
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: resp})
 
 		writeJSON(w, map[string]string{"status": "stopped"})
 	}
@@ -231,13 +233,14 @@ func (s *Server) batchPauseHandler() http.HandlerFunc {
 
 		s.batchMu.Lock()
 		s.batchPaused = true
-		s.batchMu.Unlock()
-
-		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+		resp := BatchStatusResponse{
 			Running: s.batchRunning,
 			Paused:  true,
 			Auto:    s.autoMode,
-		}})
+		}
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: resp})
 
 		writeJSON(w, map[string]string{"status": "paused"})
 	}
@@ -252,13 +255,14 @@ func (s *Server) batchResumeHandler() http.HandlerFunc {
 
 		s.batchMu.Lock()
 		s.batchPaused = false
-		s.batchMu.Unlock()
-
-		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+		resp := BatchStatusResponse{
 			Running: s.batchRunning,
 			Paused:  false,
 			Auto:    s.autoMode,
-		}})
+		}
+		s.batchMu.Unlock()
+
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: resp})
 
 		writeJSON(w, map[string]string{"status": "resumed"})
 	}
@@ -273,15 +277,15 @@ func (s *Server) batchAutoHandler() http.HandlerFunc {
 
 		s.batchMu.Lock()
 		s.autoMode = !s.autoMode
-		autoMode := s.autoMode
-		s.batchMu.Unlock()
-
-		s.Broadcast(SSEEvent{Type: "batch_update", Data: BatchStatusResponse{
+		resp := BatchStatusResponse{
 			Running: s.batchRunning,
 			Paused:  s.batchPaused,
-			Auto:    autoMode,
-		}})
+			Auto:    s.autoMode,
+		}
+		s.batchMu.Unlock()
 
-		writeJSON(w, map[string]bool{"auto": autoMode})
+		s.Broadcast(SSEEvent{Type: "batch_update", Data: resp})
+
+		writeJSON(w, map[string]bool{"auto": resp.Auto})
 	}
 }
