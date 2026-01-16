@@ -75,7 +75,7 @@ func taskToResponse(t *domain.Task) TaskResponse {
 	}
 }
 
-func agentToResponse(a *executor.Agent, includeLines int) AgentResponse {
+func agentToResponse(a *executor.Agent, store Store, includeLines int) AgentResponse {
 	resp := AgentResponse{
 		ID:           a.ID,
 		TaskID:       a.TaskID.String(),
@@ -84,6 +84,13 @@ func agentToResponse(a *executor.Agent, includeLines int) AgentResponse {
 		TokensOutput: a.TokensOutput,
 		CostUSD:      a.CostUSD,
 		WorktreePath: a.WorktreePath,
+	}
+
+	// Look up task title from store
+	if store != nil {
+		if task, err := store.GetTask(a.TaskID.String()); err == nil && task != nil {
+			resp.TaskTitle = task.Title
+		}
 	}
 
 	if a.StartedAt != nil {
@@ -211,7 +218,7 @@ func (s *Server) listAgentsHandler() http.HandlerFunc {
 		agents := s.agents.GetAll()
 		resp := make([]AgentResponse, 0, len(agents))
 		for _, a := range agents {
-			resp = append(resp, agentToResponse(a, 10))
+			resp = append(resp, agentToResponse(a, s.store, 10))
 		}
 
 		writeJSON(w, resp)
@@ -248,7 +255,7 @@ func (s *Server) getAgentHandler() http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, agentToResponse(agent, 50))
+		writeJSON(w, agentToResponse(agent, s.store, 10))
 	}
 }
 
@@ -277,7 +284,7 @@ func (s *Server) stopAgentHandler() http.HandlerFunc {
 
 		agent.Stop()
 
-		s.Broadcast(SSEEvent{Type: "agent_update", Data: agentToResponse(agent, 0)})
+		s.Broadcast(SSEEvent{Type: "agent_update", Data: agentToResponse(agent, s.store, 0)})
 
 		writeJSON(w, map[string]string{"status": "stopped"})
 	}
@@ -309,7 +316,7 @@ func (s *Server) resumeAgentHandler() http.HandlerFunc {
 		go func() {
 			ctx := context.Background()
 			if err := agent.Resume(ctx); err != nil {
-				s.Broadcast(SSEEvent{Type: "agent_update", Data: agentToResponse(agent, 0)})
+				s.Broadcast(SSEEvent{Type: "agent_update", Data: agentToResponse(agent, s.store, 0)})
 			}
 		}()
 
