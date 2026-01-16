@@ -168,3 +168,27 @@ func TestGetGroupPriorities(t *testing.T) {
 		t.Errorf("priorities[analytics] = %d, want 2", priorities["analytics"])
 	}
 }
+
+func TestSetGroupPriority(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Set priority for new group
+	if err := store.SetGroupPriority("auth", 0); err != nil {
+		t.Fatalf("SetGroupPriority() error = %v", err)
+	}
+
+	// Update existing group priority
+	if err := store.SetGroupPriority("auth", 1); err != nil {
+		t.Fatalf("SetGroupPriority() update error = %v", err)
+	}
+
+	// Verify the update
+	priorities, _ := store.GetGroupPriorities()
+	if priorities["auth"] != 1 {
+		t.Errorf("priorities[auth] = %d, want 1", priorities["auth"])
+	}
+}

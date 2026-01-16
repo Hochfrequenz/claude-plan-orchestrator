@@ -372,6 +372,16 @@ func (s *Store) GetGroupPriorities() (map[string]int, error) {
 	return priorities, rows.Err()
 }
 
+// SetGroupPriority sets the priority tier for a group (upsert)
+func (s *Store) SetGroupPriority(group string, priority int) error {
+	_, err := s.db.Exec(`
+		INSERT INTO group_priorities (group_name, priority)
+		VALUES (?, ?)
+		ON CONFLICT(group_name) DO UPDATE SET priority = excluded.priority
+	`, group, priority)
+	return err
+}
+
 // ListRecentAgentRuns returns completed/failed agent runs, in chronological order (oldest first)
 func (s *Store) ListRecentAgentRuns(limit int) ([]*AgentRun, error) {
 	// Get the N most recent runs, then reverse to show in chronological order
