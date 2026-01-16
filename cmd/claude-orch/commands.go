@@ -26,14 +26,16 @@ import (
 )
 
 var (
-	startCount     int
-	startModule    string
-	listStatus     string
-	listModule     string
-	listPriority   int
-	servePort      int
-	syncSkipIssues bool
-	syncIssuesOnly bool
+	startCount       int
+	startModule      string
+	listStatus       string
+	listModule       string
+	listPriority     int
+	servePort        int
+	syncSkipIssues   bool
+	syncIssuesOnly   bool
+	cleanupDryRun    bool
+	cleanupAll       bool
 )
 
 func init() {
@@ -141,6 +143,23 @@ Use --quick for a faster HTTP-only test without spawning a Claude agent.`,
 
 	buildPoolCmd.AddCommand(buildPoolStartCmd, buildPoolStatusCmd, buildPoolStopCmd, buildPoolTestCmd)
 	rootCmd.AddCommand(buildPoolCmd)
+
+	// cleanup command group
+	cleanupCmd := &cobra.Command{
+		Use:   "cleanup",
+		Short: "Cleanup commands",
+	}
+
+	cleanupWorktreesCmd := &cobra.Command{
+		Use:   "worktrees",
+		Short: "Remove orphaned git worktrees",
+		RunE:  runCleanupWorktrees,
+	}
+	cleanupWorktreesCmd.Flags().BoolVar(&cleanupDryRun, "dry-run", false, "Show what would be deleted without deleting")
+	cleanupWorktreesCmd.Flags().BoolVar(&cleanupAll, "all", false, "Remove all worktrees (not just orphaned)")
+
+	cleanupCmd.AddCommand(cleanupWorktreesCmd)
+	rootCmd.AddCommand(cleanupCmd)
 }
 
 func loadConfig() (*config.Config, error) {
@@ -840,6 +859,87 @@ func runBuildPoolTest(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("\n✗ Agent test failed: %s\n", result.Error)
 	}
+
+	return nil
+}
+
+func runCleanupWorktrees(cmd *cobra.Command, args []string) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	wtMgr := executor.NewWorktreeManager(cfg.General.ProjectRoot, cfg.General.WorktreeDir)
+
+	paths, err := wtMgr.List()
+	if err != nil {
+		return fmt.Errorf("list worktrees: %w", err)
+	}
+
+	if len(paths) == 0 {
+		fmt.Println("No worktrees found.")
+		return nil
+	}
+
+	// Get active agent runs from database to identify orphans
+	store, err := taskstore.New(cfg.General.DatabasePath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	activeWorktrees := make(map[string]bool)
+	if !cleanupAll {
+		runs, err := store.ListActiveAgentRuns()
+		if err != nil {
+			return fmt.Errorf("list active runs: %w", err)
+		}
+		for _, run := range runs {
+			if run.WorktreePath != "" {
+				activeWorktrees[run.WorktreePath] = true
+			}
+		}
+	}
+
+	var toRemove []string
+	for _, path := range paths {
+		if cleanupAll || !activeWorktrees[path] {
+			toRemove = append(toRemove, path)
+		}
+	}
+
+	if len(toRemove) == 0 {
+		fmt.Println("No orphaned worktrees to clean up.")
+		return nil
+	}
+
+	fmt.Printf("Found %d worktree(s) to remove:\n", len(toRemove))
+	for _, path := range toRemove {
+		fmt.Printf("  - %s\n", path)
+	}
+
+	if cleanupDryRun {
+		fmt.Println("\nDry run - no changes made.")
+		return nil
+	}
+
+	fmt.Println()
+	var removed, failed int
+	for _, path := range toRemove {
+		if err := wtMgr.Remove(path); err != nil {
+			fmt.Printf("  Failed to remove %s: %v\n", path, err)
+			failed++
+		} else {
+			fmt.Printf("  Removed %s\n", path)
+			removed++
+		}
+	}
+
+	fmt.Printf("\nRemoved %d worktree(s)", removed)
+	if failed > 0 {
+		fmt.Printf(", %d failed", failed)
+	}
+	fmt.Println()
 
 	return nil
 }

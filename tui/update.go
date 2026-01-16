@@ -835,6 +835,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Remove successfully completed agent from the list
 		if completedIdx >= 0 {
+			// Clean up worktree on successful completion
+			agent := m.agents[completedIdx]
+			if m.worktreeManager != nil && agent.WorktreePath != "" {
+				if err := m.worktreeManager.Remove(agent.WorktreePath); err != nil {
+					m.statusMsg = fmt.Sprintf("Warning: worktree cleanup failed: %v", err)
+				}
+			}
 			m.agents = append(m.agents[:completedIdx], m.agents[completedIdx+1:]...)
 			// Adjust selected agent index if needed
 			if m.selectedAgent >= len(m.agents) && m.selectedAgent > 0 {
@@ -1355,6 +1362,16 @@ func (m *Model) updateAgentsFromManager() {
 			allDone = false
 		} else if agent.Status == executor.AgentQueued {
 			allDone = false
+		}
+	}
+
+	// Clean up worktrees for completed agents before removing them
+	for _, idx := range toRemove {
+		agent := m.agents[idx]
+		if m.worktreeManager != nil && agent.WorktreePath != "" {
+			if err := m.worktreeManager.Remove(agent.WorktreePath); err != nil {
+				m.statusMsg = fmt.Sprintf("Warning: worktree cleanup failed: %v", err)
+			}
 		}
 	}
 
