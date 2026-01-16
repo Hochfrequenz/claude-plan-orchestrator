@@ -8,10 +8,11 @@ import (
 
 // Scheduler determines which tasks are ready to run
 type Scheduler struct {
-	tasks     []*domain.Task
-	taskMap   map[string]*domain.Task
-	completed map[string]bool
-	depGraph  map[string][]string // task -> tasks that depend on it
+	tasks           []*domain.Task
+	taskMap         map[string]*domain.Task
+	completed       map[string]bool
+	depGraph        map[string][]string // task -> tasks that depend on it
+	groupPriorities map[string]int      // group -> priority tier
 }
 
 // New creates a new Scheduler
@@ -32,6 +33,13 @@ func New(tasks []*domain.Task, completed map[string]bool) *Scheduler {
 		completed: completed,
 		depGraph:  depGraph,
 	}
+}
+
+// NewWithPriorities creates a Scheduler with group priority constraints
+func NewWithPriorities(tasks []*domain.Task, completed map[string]bool, groupPriorities map[string]int) *Scheduler {
+	s := New(tasks, completed)
+	s.groupPriorities = groupPriorities
+	return s
 }
 
 // GetReadyTasks returns up to limit tasks that are ready to run

@@ -98,3 +98,90 @@ func TestScheduler_DependencyDepth(t *testing.T) {
 		t.Errorf("billing/E00 depth = %d, want 0", depth)
 	}
 }
+
+func TestScheduler_WithGroupPriorities(t *testing.T) {
+	tasks := []*domain.Task{
+		{ID: domain.TaskID{Module: "auth", EpicNum: 0}, Status: domain.StatusNotStarted},
+		{ID: domain.TaskID{Module: "billing", EpicNum: 0}, Status: domain.StatusNotStarted},
+		{ID: domain.TaskID{Module: "analytics", EpicNum: 0}, Status: domain.StatusNotStarted},
+	}
+	completed := map[string]bool{}
+	priorities := map[string]int{
+		"auth":      0, // tier 0 - runs first
+		"billing":   1, // tier 1 - runs after auth completes
+		"analytics": 2, // tier 2 - runs last
+	}
+
+	sched := NewWithPriorities(tasks, completed, priorities)
+	ready := sched.GetReadyTasks(10)
+
+	// Only auth (tier 0) should be ready
+	if len(ready) != 1 {
+		t.Errorf("Ready count = %d, want 1", len(ready))
+	}
+	if ready[0].ID.Module != "auth" {
+		t.Errorf("Ready task = %s, want auth/E00", ready[0].ID.String())
+	}
+}
+
+func TestScheduler_GroupPriorities_TierAdvance(t *testing.T) {
+	tasks := []*domain.Task{
+		{ID: domain.TaskID{Module: "auth", EpicNum: 0}, Status: domain.StatusComplete},
+		{ID: domain.TaskID{Module: "billing", EpicNum: 0}, Status: domain.StatusNotStarted},
+		{ID: domain.TaskID{Module: "reporting", EpicNum: 0}, Status: domain.StatusNotStarted},
+		{ID: domain.TaskID{Module: "analytics", EpicNum: 0}, Status: domain.StatusNotStarted},
+	}
+	completed := map[string]bool{"auth/E00": true}
+	priorities := map[string]int{
+		"auth":      0,
+		"billing":   1,
+		"reporting": 1, // Same tier as billing
+		"analytics": 2,
+	}
+
+	sched := NewWithPriorities(tasks, completed, priorities)
+	ready := sched.GetReadyTasks(10)
+
+	// billing and reporting (both tier 1) should be ready
+	if len(ready) != 2 {
+		t.Errorf("Ready count = %d, want 2", len(ready))
+	}
+
+	modules := make(map[string]bool)
+	for _, task := range ready {
+		modules[task.ID.Module] = true
+	}
+	if !modules["billing"] || !modules["reporting"] {
+		t.Errorf("Expected billing and reporting, got %v", modules)
+	}
+}
+
+func TestScheduler_GroupPriorities_UnassignedDefaultsToZero(t *testing.T) {
+	tasks := []*domain.Task{
+		{ID: domain.TaskID{Module: "auth", EpicNum: 0}, Status: domain.StatusNotStarted},
+		{ID: domain.TaskID{Module: "notifications", EpicNum: 0}, Status: domain.StatusNotStarted}, // Not in priorities
+		{ID: domain.TaskID{Module: "billing", EpicNum: 0}, Status: domain.StatusNotStarted},
+	}
+	completed := map[string]bool{}
+	priorities := map[string]int{
+		"auth":    0,
+		"billing": 1,
+		// notifications not listed - should default to tier 0
+	}
+
+	sched := NewWithPriorities(tasks, completed, priorities)
+	ready := sched.GetReadyTasks(10)
+
+	// auth and notifications (both effectively tier 0) should be ready
+	if len(ready) != 2 {
+		t.Errorf("Ready count = %d, want 2", len(ready))
+	}
+
+	modules := make(map[string]bool)
+	for _, task := range ready {
+		modules[task.ID.Module] = true
+	}
+	if !modules["auth"] || !modules["notifications"] {
+		t.Errorf("Expected auth and notifications, got %v", modules)
+	}
+}
