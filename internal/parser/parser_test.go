@@ -24,7 +24,7 @@ Implement input validation for all user-facing forms.
 - Validate phone numbers
 `
 	dir := t.TempDir()
-	epicPath := filepath.Join(dir, "technical-module", "epic-05-validators.md")
+	epicPath := filepath.Join(dir, "technical", "epic-05-validators.md")
 	os.MkdirAll(filepath.Dir(epicPath), 0755)
 	os.WriteFile(epicPath, []byte(content), 0644)
 
@@ -33,8 +33,8 @@ Implement input validation for all user-facing forms.
 		t.Fatal(err)
 	}
 
-	if task.ID.String() != "technical-module/E05" {
-		t.Errorf("ID = %q, want technical-module/E05", task.ID.String())
+	if task.ID.String() != "technical/E05" {
+		t.Errorf("ID = %q, want technical/E05", task.ID.String())
 	}
 	if task.Title != "Epic 05: Validators" {
 		t.Errorf("Title = %q, want 'Epic 05: Validators'", task.Title)
@@ -52,7 +52,7 @@ Implement input validation for all user-facing forms.
 
 func TestParseModuleDir(t *testing.T) {
 	dir := t.TempDir()
-	moduleDir := filepath.Join(dir, "technical-module")
+	moduleDir := filepath.Join(dir, "technical")
 	os.MkdirAll(moduleDir, 0755)
 
 	// Create overview
@@ -83,7 +83,7 @@ func TestParseModuleDir(t *testing.T) {
 func TestParseModuleDir_MissingPredecessor(t *testing.T) {
 	// Test that implicit dependencies are NOT added when predecessor doesn't exist
 	dir := t.TempDir()
-	moduleDir := filepath.Join(dir, "pm-tool-module")
+	moduleDir := filepath.Join(dir, "pm-tool")
 	os.MkdirAll(moduleDir, 0755)
 
 	// Create E01 without E00 - simulates the user's scenario
