@@ -49,6 +49,9 @@ func New(dbPath string) (*Store, error) {
 	// Add github_issue column to tasks (ignore error if already exists)
 	db.Exec(migrationTasksGitHubIssue)
 
+	// Add index on tasks.github_issue for query performance
+	db.Exec(migrationTasksGitHubIssueIndex)
+
 	return &Store{db: db}, nil
 }
 
@@ -65,8 +68,8 @@ func (s *Store) UpsertTask(task *domain.Task) error {
 	}
 
 	_, err = s.db.Exec(`
-		INSERT INTO tasks (id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, github_issue, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			description = excluded.description,
@@ -75,6 +78,7 @@ func (s *Store) UpsertTask(task *domain.Task) error {
 			depends_on = excluded.depends_on,
 			needs_review = excluded.needs_review,
 			file_path = excluded.file_path,
+			github_issue = excluded.github_issue,
 			updated_at = excluded.updated_at
 	`,
 		task.ID.String(),
@@ -87,6 +91,7 @@ func (s *Store) UpsertTask(task *domain.Task) error {
 		string(depsJSON),
 		task.NeedsReview,
 		task.FilePath,
+		task.GitHubIssue,
 		task.CreatedAt,
 		task.UpdatedAt,
 	)
@@ -477,4 +482,149 @@ func (s *Store) ListRecentAgentRuns(limit int) ([]*AgentRun, error) {
 	}
 
 	return runs, rows.Err()
+}
+
+// UpsertGitHubIssue inserts or updates a GitHub issue record
+func (s *Store) UpsertGitHubIssue(issue *domain.GitHubIssue) error {
+	now := time.Now()
+	_, err := s.db.Exec(`
+		INSERT INTO github_issues (issue_number, repo, title, status, group_name, analyzed_at, plan_path, closed_at, pr_number, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(issue_number) DO UPDATE SET
+			repo = excluded.repo,
+			title = excluded.title,
+			status = excluded.status,
+			group_name = excluded.group_name,
+			analyzed_at = excluded.analyzed_at,
+			plan_path = excluded.plan_path,
+			closed_at = excluded.closed_at,
+			pr_number = excluded.pr_number,
+			updated_at = excluded.updated_at
+	`, issue.IssueNumber, issue.Repo, issue.Title, string(issue.Status), issue.GroupName,
+		issue.AnalyzedAt, issue.PlanPath, issue.ClosedAt, issue.PRNumber, now, now)
+	return err
+}
+
+// GetGitHubIssue retrieves a GitHub issue by its issue number
+func (s *Store) GetGitHubIssue(issueNumber int) (*domain.GitHubIssue, error) {
+	row := s.db.QueryRow(`
+		SELECT issue_number, repo, title, status, group_name, analyzed_at, plan_path, closed_at, pr_number, created_at, updated_at
+		FROM github_issues WHERE issue_number = ?
+	`, issueNumber)
+
+	var issue domain.GitHubIssue
+	var status string
+	var groupName sql.NullString
+	var analyzedAt sql.NullTime
+	var planPath sql.NullString
+	var closedAt sql.NullTime
+	var prNumber sql.NullInt64
+
+	err := row.Scan(&issue.IssueNumber, &issue.Repo, &issue.Title, &status, &groupName,
+		&analyzedAt, &planPath, &closedAt, &prNumber, &issue.CreatedAt, &issue.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	issue.Status = domain.IssueStatus(status)
+	if groupName.Valid {
+		issue.GroupName = groupName.String
+	}
+	if analyzedAt.Valid {
+		issue.AnalyzedAt = &analyzedAt.Time
+	}
+	if planPath.Valid {
+		issue.PlanPath = planPath.String
+	}
+	if closedAt.Valid {
+		issue.ClosedAt = &closedAt.Time
+	}
+	if prNumber.Valid {
+		pn := int(prNumber.Int64)
+		issue.PRNumber = &pn
+	}
+	return &issue, nil
+}
+
+// ListPendingIssues returns all GitHub issues with status "pending" for a given repo
+func (s *Store) ListPendingIssues(repo string) ([]*domain.GitHubIssue, error) {
+	rows, err := s.db.Query(`
+		SELECT issue_number, repo, title, status, group_name, analyzed_at, plan_path, closed_at, pr_number, created_at, updated_at
+		FROM github_issues WHERE repo = ? AND status = ?
+	`, repo, string(domain.IssuePending))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var issues []*domain.GitHubIssue
+	for rows.Next() {
+		var issue domain.GitHubIssue
+		var status string
+		var groupName sql.NullString
+		var analyzedAt sql.NullTime
+		var planPath sql.NullString
+		var closedAt sql.NullTime
+		var prNumber sql.NullInt64
+
+		if err := rows.Scan(&issue.IssueNumber, &issue.Repo, &issue.Title, &status, &groupName,
+			&analyzedAt, &planPath, &closedAt, &prNumber, &issue.CreatedAt, &issue.UpdatedAt); err != nil {
+			return nil, err
+		}
+		issue.Status = domain.IssueStatus(status)
+		if groupName.Valid {
+			issue.GroupName = groupName.String
+		}
+		if analyzedAt.Valid {
+			issue.AnalyzedAt = &analyzedAt.Time
+		}
+		if planPath.Valid {
+			issue.PlanPath = planPath.String
+		}
+		if closedAt.Valid {
+			issue.ClosedAt = &closedAt.Time
+		}
+		if prNumber.Valid {
+			pn := int(prNumber.Int64)
+			issue.PRNumber = &pn
+		}
+		issues = append(issues, &issue)
+	}
+	return issues, rows.Err()
+}
+
+// UpdateIssueStatus updates the status of a GitHub issue
+func (s *Store) UpdateIssueStatus(issueNumber int, status domain.IssueStatus) error {
+	_, err := s.db.Exec(`UPDATE github_issues SET status = ?, updated_at = ? WHERE issue_number = ?`,
+		string(status), time.Now(), issueNumber)
+	return err
+}
+
+// MarkIssueClosed marks a GitHub issue as implemented with the associated PR number
+func (s *Store) MarkIssueClosed(issueNumber int, prNumber int) error {
+	now := time.Now()
+	_, err := s.db.Exec(`UPDATE github_issues SET status = ?, closed_at = ?, pr_number = ?, updated_at = ? WHERE issue_number = ?`,
+		string(domain.IssueImplemented), now, prNumber, now, issueNumber)
+	return err
+}
+
+// GetIncompleteEpicsForIssue returns all tasks linked to a GitHub issue that are not complete
+func (s *Store) GetIncompleteEpicsForIssue(issueNumber int) ([]*domain.Task, error) {
+	rows, err := s.db.Query(`
+		SELECT id, module, epic_num, title, description, status, priority, depends_on, needs_review, file_path, created_at, updated_at
+		FROM tasks WHERE github_issue = ? AND status != ?
+	`, issueNumber, string(domain.StatusComplete))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []*domain.Task
+	for rows.Next() {
+		task, err := scanTaskRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
 }

@@ -311,3 +311,195 @@ func TestGetGroupsWithTaskCounts(t *testing.T) {
 		t.Errorf("auth.Priority = %d, want 0", authStats.Priority)
 	}
 }
+
+func TestStore_UpsertAndGetGitHubIssue(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	issue := &domain.GitHubIssue{
+		IssueNumber: 42,
+		Repo:        "owner/repo",
+		Title:       "Test Issue",
+		Status:      domain.IssuePending,
+		GroupName:   "billing",
+	}
+
+	// Upsert
+	err = store.UpsertGitHubIssue(issue)
+	if err != nil {
+		t.Fatalf("UpsertGitHubIssue() error = %v", err)
+	}
+
+	// Get
+	got, err := store.GetGitHubIssue(42)
+	if err != nil {
+		t.Fatalf("GetGitHubIssue() error = %v", err)
+	}
+	if got.Title != "Test Issue" {
+		t.Errorf("Title = %v, want %v", got.Title, "Test Issue")
+	}
+	if got.GroupName != "billing" {
+		t.Errorf("GroupName = %v, want %v", got.GroupName, "billing")
+	}
+}
+
+func TestStore_ListPendingIssues(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Insert test issues
+	store.UpsertGitHubIssue(&domain.GitHubIssue{
+		IssueNumber: 1, Repo: "owner/repo", Title: "Pending", Status: domain.IssuePending,
+	})
+	store.UpsertGitHubIssue(&domain.GitHubIssue{
+		IssueNumber: 2, Repo: "owner/repo", Title: "Ready", Status: domain.IssueReady,
+	})
+	store.UpsertGitHubIssue(&domain.GitHubIssue{
+		IssueNumber: 3, Repo: "other/repo", Title: "Other Repo", Status: domain.IssuePending,
+	})
+
+	issues, err := store.ListPendingIssues("owner/repo")
+	if err != nil {
+		t.Fatalf("ListPendingIssues() error = %v", err)
+	}
+	if len(issues) != 1 {
+		t.Errorf("got %d pending issues, want 1", len(issues))
+	}
+}
+
+func TestStore_UpdateIssueStatus(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Insert initial issue
+	store.UpsertGitHubIssue(&domain.GitHubIssue{
+		IssueNumber: 10, Repo: "owner/repo", Title: "Test", Status: domain.IssuePending,
+	})
+
+	// Update status
+	err = store.UpdateIssueStatus(10, domain.IssueReady)
+	if err != nil {
+		t.Fatalf("UpdateIssueStatus() error = %v", err)
+	}
+
+	// Verify
+	got, err := store.GetGitHubIssue(10)
+	if err != nil {
+		t.Fatalf("GetGitHubIssue() error = %v", err)
+	}
+	if got.Status != domain.IssueReady {
+		t.Errorf("Status = %v, want %v", got.Status, domain.IssueReady)
+	}
+}
+
+func TestStore_MarkIssueClosed(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Insert initial issue
+	store.UpsertGitHubIssue(&domain.GitHubIssue{
+		IssueNumber: 20, Repo: "owner/repo", Title: "Test", Status: domain.IssueReady,
+	})
+
+	// Mark as closed
+	err = store.MarkIssueClosed(20, 123)
+	if err != nil {
+		t.Fatalf("MarkIssueClosed() error = %v", err)
+	}
+
+	// Verify
+	got, err := store.GetGitHubIssue(20)
+	if err != nil {
+		t.Fatalf("GetGitHubIssue() error = %v", err)
+	}
+	if got.Status != domain.IssueImplemented {
+		t.Errorf("Status = %v, want %v", got.Status, domain.IssueImplemented)
+	}
+	if got.PRNumber == nil || *got.PRNumber != 123 {
+		t.Errorf("PRNumber = %v, want 123", got.PRNumber)
+	}
+	if got.ClosedAt == nil {
+		t.Error("ClosedAt should not be nil")
+	}
+}
+
+func TestStore_GetIncompleteEpicsForIssue(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Insert an issue
+	store.UpsertGitHubIssue(&domain.GitHubIssue{
+		IssueNumber: 30, Repo: "owner/repo", Title: "Feature Issue", Status: domain.IssueReady,
+	})
+
+	// Insert tasks linked to this issue
+	now := time.Now()
+	issueNum := 30
+
+	// Complete task
+	store.UpsertTask(&domain.Task{
+		ID:          domain.TaskID{Module: "feature", EpicNum: 0},
+		Title:       "Setup",
+		Status:      domain.StatusComplete,
+		FilePath:    "test.md",
+		GitHubIssue: &issueNum,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// Incomplete tasks
+	store.UpsertTask(&domain.Task{
+		ID:          domain.TaskID{Module: "feature", EpicNum: 1},
+		Title:       "Core",
+		Status:      domain.StatusInProgress,
+		FilePath:    "test.md",
+		GitHubIssue: &issueNum,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	store.UpsertTask(&domain.Task{
+		ID:          domain.TaskID{Module: "feature", EpicNum: 2},
+		Title:       "Tests",
+		Status:      domain.StatusNotStarted,
+		FilePath:    "test.md",
+		GitHubIssue: &issueNum,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// Task from different issue
+	otherIssue := 31
+	store.UpsertTask(&domain.Task{
+		ID:          domain.TaskID{Module: "other", EpicNum: 0},
+		Title:       "Other",
+		Status:      domain.StatusNotStarted,
+		FilePath:    "test.md",
+		GitHubIssue: &otherIssue,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+
+	// Get incomplete epics for issue 30
+	tasks, err := store.GetIncompleteEpicsForIssue(30)
+	if err != nil {
+		t.Fatalf("GetIncompleteEpicsForIssue() error = %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("got %d incomplete tasks, want 2", len(tasks))
+	}
+}

@@ -117,3 +117,8 @@ CREATE TABLE IF NOT EXISTS github_issues (
 const migrationTasksGitHubIssue = `
 ALTER TABLE tasks ADD COLUMN github_issue INTEGER REFERENCES github_issues(issue_number);
 `
+
+// Migration to add index on tasks.github_issue for query performance
+const migrationTasksGitHubIssueIndex = `
+CREATE INDEX IF NOT EXISTS idx_tasks_github_issue ON tasks(github_issue);
+`
