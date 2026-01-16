@@ -50,6 +50,48 @@ Implement input validation for all user-facing forms.
 	}
 }
 
+func TestMatchEpicFile(t *testing.T) {
+	tests := []struct {
+		filename string
+		wantNum  int
+		wantOk   bool
+	}{
+		// Standard pattern: epic-01-name.md
+		{"epic-00-setup.md", 0, true},
+		{"epic-01-entities.md", 1, true},
+		{"epic-99-final.md", 99, true},
+
+		// Number prefix pattern: 01-epic-name.md
+		{"01-epic-setup.md", 1, true},
+		{"02-epic-foundation.md", 2, true},
+		{"10-epic-testing.md", 10, true},
+
+		// Subsystem prefix pattern: epic-cli-02-name.md
+		{"epic-cli-02-customer.md", 2, true},
+		{"epic-tui-05-dashboard.md", 5, true},
+		{"epic-api-00-scaffolding.md", 0, true},
+
+		// Non-matching patterns
+		{"README.md", 0, false},
+		{"00-overview.md", 0, false},
+		{"epic.md", 0, false},
+		{"epic-name.md", 0, false},
+		{"some-file.txt", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			num, ok := matchEpicFile(tt.filename)
+			if ok != tt.wantOk {
+				t.Errorf("matchEpicFile(%q) ok = %v, want %v", tt.filename, ok, tt.wantOk)
+			}
+			if num != tt.wantNum {
+				t.Errorf("matchEpicFile(%q) num = %d, want %d", tt.filename, num, tt.wantNum)
+			}
+		})
+	}
+}
+
 func TestParseModuleDir(t *testing.T) {
 	dir := t.TempDir()
 	moduleDir := filepath.Join(dir, "technical")

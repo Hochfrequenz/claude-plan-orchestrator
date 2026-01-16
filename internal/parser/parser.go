@@ -15,11 +15,31 @@ import (
 )
 
 var (
-	epicFileRegex = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)
-	titleRegex    = regexp.MustCompile(`^#\s+(.+)$`)
+	// Epic file patterns - supports multiple naming conventions:
+	// - epic-01-name.md (standard)
+	// - 01-epic-name.md (number prefix)
+	// - epic-cli-02-name.md (epic with subsystem prefix)
+	epicFilePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^epic-(\d+)-.*\.md$`),        // epic-01-name.md
+		regexp.MustCompile(`^(\d+)-epic-.*\.md$`),        // 01-epic-name.md
+		regexp.MustCompile(`^epic-[a-z]+-(\d+)-.*\.md$`), // epic-cli-02-name.md
+	}
+	titleRegex = regexp.MustCompile(`^#\s+(.+)$`)
 	// Match table rows like: | [E01](path) | Description | 🟢 | or | E01 | Title | 🟢 |
 	readmeStatusRegex = regexp.MustCompile(`\|\s*\[?E(\d+)\]?(?:\([^)]*\))?\s*\|.*([🔴🟡🟢])\s*\|`)
 )
+
+// matchEpicFile tries to match a filename against epic file patterns.
+// Returns the epic number and true if matched, or 0 and false if not.
+func matchEpicFile(filename string) (epicNum int, ok bool) {
+	for _, re := range epicFilePatterns {
+		if matches := re.FindStringSubmatch(filename); matches != nil {
+			num, _ := strconv.Atoi(matches[1])
+			return num, true
+		}
+	}
+	return 0, false
+}
 
 // ParseEpicFile parses a single epic markdown file into a Task
 func ParseEpicFile(path string) (*domain.Task, error) {
@@ -76,7 +96,7 @@ func ParseModuleDir(dir string) ([]*domain.Task, error) {
 		if entry.IsDir() {
 			continue
 		}
-		if !epicFileRegex.MatchString(entry.Name()) {
+		if _, ok := matchEpicFile(entry.Name()); !ok {
 			continue
 		}
 
@@ -169,8 +189,10 @@ func directoryHasEpicFiles(dir string) (bool, error) {
 		return false, err
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() && epicFileRegex.MatchString(entry.Name()) {
-			return true, nil
+		if !entry.IsDir() {
+			if _, ok := matchEpicFile(entry.Name()); ok {
+				return true, nil
+			}
 		}
 	}
 	return false, nil
@@ -276,11 +298,10 @@ func ExtractTaskIDFromPath(path string) (domain.TaskID, error) {
 	}
 
 	// Extract epic number from filename
-	matches := epicFileRegex.FindStringSubmatch(base)
-	if matches == nil {
+	epicNum, ok := matchEpicFile(base)
+	if !ok {
 		return domain.TaskID{}, fmt.Errorf("invalid epic filename: %s", base)
 	}
-	epicNum, _ := strconv.Atoi(matches[1])
 
 	return domain.TaskID{Module: module, EpicNum: epicNum}, nil
 }
