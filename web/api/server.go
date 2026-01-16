@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"sync"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/prbot"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 	"github.com/hochfrequenz/claude-plan-orchestrator/web/ui"
 )
 
@@ -18,21 +21,31 @@ type Store interface {
 
 // Server is the HTTP API server
 type Server struct {
-	store  Store
-	agents *executor.AgentManager
-	addr   string
-	mux    *http.ServeMux
-	sseHub *SSEHub
+	store     Store
+	agents    *executor.AgentManager
+	scheduler *scheduler.Scheduler
+	prbot     *prbot.PRBot
+	addr      string
+	mux       *http.ServeMux
+	sseHub    *SSEHub
+
+	// Batch state
+	batchMu      sync.RWMutex
+	batchRunning bool
+	batchPaused  bool
+	autoMode     bool
 }
 
 // NewServer creates a new API server
-func NewServer(store Store, agents *executor.AgentManager, addr string) *Server {
+func NewServer(store Store, agents *executor.AgentManager, sched *scheduler.Scheduler, pr *prbot.PRBot, addr string) *Server {
 	s := &Server{
-		store:  store,
-		agents: agents,
-		addr:   addr,
-		mux:    http.NewServeMux(),
-		sseHub: NewSSEHub(),
+		store:     store,
+		agents:    agents,
+		scheduler: sched,
+		prbot:     pr,
+		addr:      addr,
+		mux:       http.NewServeMux(),
+		sseHub:    NewSSEHub(),
 	}
 	s.setupRoutes()
 	return s

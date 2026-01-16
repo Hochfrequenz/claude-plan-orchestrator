@@ -705,7 +705,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Web.Host, port)
 	adapter := &storeAdapter{store: store}
-	server := api.NewServer(adapter, nil, addr)
+	server := api.NewServer(adapter, nil, nil, nil, addr)
 
 	fmt.Printf("Starting web UI at http://%s\n", addr)
 	return server.Start()

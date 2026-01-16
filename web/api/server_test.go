@@ -17,7 +17,7 @@ func TestListTasksHandler(t *testing.T) {
 		},
 	}
 
-	server := NewServer(store, nil, ":8080")
+	server := NewServer(store, nil, nil, nil, ":8080")
 	handler := server.listTasksHandler()
 
 	req := httptest.NewRequest("GET", "/api/tasks", nil)
@@ -46,7 +46,7 @@ func TestStatusHandler(t *testing.T) {
 		},
 	}
 
-	server := NewServer(store, nil, ":8080")
+	server := NewServer(store, nil, nil, nil, ":8080")
 	handler := server.statusHandler()
 
 	req := httptest.NewRequest("GET", "/api/status", nil)
