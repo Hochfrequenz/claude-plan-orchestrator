@@ -185,3 +185,54 @@ func TestScheduler_GroupPriorities_UnassignedDefaultsToZero(t *testing.T) {
 		t.Errorf("Expected auth and notifications, got %v", modules)
 	}
 }
+
+func TestScheduler_GetActivePriorityTier(t *testing.T) {
+	tests := []struct {
+		name       string
+		tasks      []*domain.Task
+		completed  map[string]bool
+		priorities map[string]int
+		wantTier   int
+	}{
+		{
+			name: "tier 0 has incomplete tasks",
+			tasks: []*domain.Task{
+				{ID: domain.TaskID{Module: "auth", EpicNum: 0}, Status: domain.StatusNotStarted},
+				{ID: domain.TaskID{Module: "billing", EpicNum: 0}, Status: domain.StatusNotStarted},
+			},
+			completed:  map[string]bool{},
+			priorities: map[string]int{"auth": 0, "billing": 1},
+			wantTier:   0,
+		},
+		{
+			name: "tier 0 complete, tier 1 active",
+			tasks: []*domain.Task{
+				{ID: domain.TaskID{Module: "auth", EpicNum: 0}, Status: domain.StatusComplete},
+				{ID: domain.TaskID{Module: "billing", EpicNum: 0}, Status: domain.StatusNotStarted},
+			},
+			completed:  map[string]bool{"auth/E00": true},
+			priorities: map[string]int{"auth": 0, "billing": 1},
+			wantTier:   1,
+		},
+		{
+			name: "unassigned group treated as tier 0",
+			tasks: []*domain.Task{
+				{ID: domain.TaskID{Module: "unassigned", EpicNum: 0}, Status: domain.StatusNotStarted},
+				{ID: domain.TaskID{Module: "billing", EpicNum: 0}, Status: domain.StatusNotStarted},
+			},
+			completed:  map[string]bool{},
+			priorities: map[string]int{"billing": 1},
+			wantTier:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sched := NewWithPriorities(tt.tasks, tt.completed, tt.priorities)
+			tier := sched.getActivePriorityTier()
+			if tier != tt.wantTier {
+				t.Errorf("getActivePriorityTier() = %d, want %d", tier, tt.wantTier)
+			}
+		})
+	}
+}

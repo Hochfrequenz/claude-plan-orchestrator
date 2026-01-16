@@ -219,6 +219,38 @@ func priorityOrder(p domain.Priority) int {
 	}
 }
 
+// getActivePriorityTier returns the lowest priority tier that has incomplete tasks
+func (s *Scheduler) getActivePriorityTier() int {
+	if len(s.groupPriorities) == 0 {
+		return 0 // No priorities configured, all tasks are tier 0
+	}
+
+	// Find the maximum tier number
+	maxTier := 0
+	for _, tier := range s.groupPriorities {
+		if tier > maxTier {
+			maxTier = tier
+		}
+	}
+
+	// Track which tiers have incomplete tasks
+	tierHasIncomplete := make(map[int]bool)
+	for _, task := range s.tasks {
+		if !s.completed[task.ID.String()] && task.Status != domain.StatusComplete {
+			tier := s.groupPriorities[task.ID.Module] // Defaults to 0 if not found
+			tierHasIncomplete[tier] = true
+		}
+	}
+
+	// Return lowest tier with incomplete work
+	for tier := 0; tier <= maxTier; tier++ {
+		if tierHasIncomplete[tier] {
+			return tier
+		}
+	}
+	return 0
+}
+
 // TopologicalSort returns tasks in dependency order
 func (s *Scheduler) TopologicalSort() ([]*domain.Task, error) {
 	inDegree := make(map[string]int)
