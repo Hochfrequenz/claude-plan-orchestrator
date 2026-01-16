@@ -214,3 +214,72 @@ func TestRemoveGroupPriority(t *testing.T) {
 		t.Errorf("auth group should be removed")
 	}
 }
+
+func TestGetGroupsWithTaskCounts(t *testing.T) {
+	store, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer store.Close()
+
+	// Add tasks for different groups
+	now := time.Now()
+	store.UpsertTask(&domain.Task{
+		ID:        domain.TaskID{Module: "auth", EpicNum: 0},
+		Title:     "Setup",
+		Status:    domain.StatusComplete,
+		FilePath:  "test.md",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	store.UpsertTask(&domain.Task{
+		ID:        domain.TaskID{Module: "auth", EpicNum: 1},
+		Title:     "Login",
+		Status:    domain.StatusNotStarted,
+		FilePath:  "test.md",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	store.UpsertTask(&domain.Task{
+		ID:        domain.TaskID{Module: "billing", EpicNum: 0},
+		Title:     "Setup",
+		Status:    domain.StatusNotStarted,
+		FilePath:  "test.md",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+
+	// Set priority for auth
+	store.SetGroupPriority("auth", 0)
+
+	stats, err := store.GetGroupsWithTaskCounts()
+	if err != nil {
+		t.Fatalf("GetGroupsWithTaskCounts() error = %v", err)
+	}
+
+	if len(stats) != 2 {
+		t.Errorf("len(stats) = %d, want 2", len(stats))
+	}
+
+	// Find auth group
+	var authStats *GroupStats
+	for _, s := range stats {
+		if s.Name == "auth" {
+			authStats = &s
+			break
+		}
+	}
+
+	if authStats == nil {
+		t.Fatal("auth group not found")
+	}
+	if authStats.Total != 2 {
+		t.Errorf("auth.Total = %d, want 2", authStats.Total)
+	}
+	if authStats.Completed != 1 {
+		t.Errorf("auth.Completed = %d, want 1", authStats.Completed)
+	}
+	if authStats.Priority != 0 {
+		t.Errorf("auth.Priority = %d, want 0", authStats.Priority)
+	}
+}

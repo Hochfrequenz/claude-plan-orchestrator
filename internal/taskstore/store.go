@@ -388,6 +388,44 @@ func (s *Store) RemoveGroupPriority(group string) error {
 	return err
 }
 
+// GroupStats holds aggregated task counts for a group
+type GroupStats struct {
+	Name      string
+	Priority  int // -1 if unassigned
+	Total     int
+	Completed int
+}
+
+// GetGroupsWithTaskCounts returns all groups with their task statistics
+func (s *Store) GetGroupsWithTaskCounts() ([]GroupStats, error) {
+	// Query task counts by module
+	rows, err := s.db.Query(`
+		SELECT
+			t.module,
+			COALESCE(gp.priority, -1) as priority,
+			COUNT(*) as total,
+			SUM(CASE WHEN t.status = 'complete' THEN 1 ELSE 0 END) as completed
+		FROM tasks t
+		LEFT JOIN group_priorities gp ON t.module = gp.group_name
+		GROUP BY t.module
+		ORDER BY COALESCE(gp.priority, 0), t.module
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []GroupStats
+	for rows.Next() {
+		var gs GroupStats
+		if err := rows.Scan(&gs.Name, &gs.Priority, &gs.Total, &gs.Completed); err != nil {
+			return nil, err
+		}
+		stats = append(stats, gs)
+	}
+	return stats, rows.Err()
+}
+
 // ListRecentAgentRuns returns completed/failed agent runs, in chronological order (oldest first)
 func (s *Store) ListRecentAgentRuns(limit int) ([]*AgentRun, error) {
 	// Get the N most recent runs, then reverse to show in chronological order
