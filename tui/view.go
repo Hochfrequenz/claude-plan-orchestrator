@@ -519,7 +519,7 @@ func (m Model) renderQueued() string {
 				blocking = "stalled (reset needed)"
 			}
 			if blocking == "" {
-				// Debug: show dependency state
+				// Debug: show dependency state and task status
 				var depInfo []string
 				for _, dep := range task.DependsOn {
 					depStr := dep.String()
@@ -529,10 +529,11 @@ func (m Model) renderQueued() string {
 						depInfo = append(depInfo, depStr+"=✗")
 					}
 				}
+				statusStr := string(task.Status)
 				if len(depInfo) > 0 {
-					blocking = fmt.Sprintf("deps:[%s] completed:%d", strings.Join(depInfo, ","), len(m.completedTasks))
+					blocking = fmt.Sprintf("status=%s deps:[%s]", statusStr, strings.Join(depInfo, ","))
 				} else {
-					blocking = fmt.Sprintf("no deps, completed:%d", len(m.completedTasks))
+					blocking = fmt.Sprintf("status=%s no deps", statusStr)
 				}
 			}
 			line := fmt.Sprintf("  ○ %-15s %-20s %s",
