@@ -1,133 +1,257 @@
 <script>
-    import { onMount, onDestroy } from 'svelte';
-    import { fetchStatus, fetchTasks, createEventSource } from './lib/api.js';
+  import { onMount, onDestroy } from 'svelte'
+  import BottomNav from './components/BottomNav.svelte'
+  import Dashboard from './components/Dashboard.svelte'
+  import Agents from './components/Agents.svelte'
+  import PRs from './components/PRs.svelte'
+  import Groups from './components/Groups.svelte'
+  import {
+    fetchStatus,
+    fetchBatchStatus,
+    fetchAgents,
+    fetchPRs,
+    fetchGroups,
+    fetchAgentLogs,
+    batchStart,
+    batchStop,
+    batchPause,
+    batchResume,
+    batchToggleAuto,
+    stopAgent,
+    resumeAgent,
+    mergePR,
+    setGroupPriority,
+    createEventSource
+  } from './lib/api.js'
 
-    let status = { total: 0, not_started: 0, in_progress: 0, complete: 0, agents_running: 0 };
-    let tasks = [];
-    let eventSource = null;
+  let activeTab = 'dashboard'
+  let status = {}
+  let batchStatus = { running: false, paused: false, auto: false }
+  let agents = []
+  let prs = []
+  let groups = []
+  let eventSource = null
 
-    onMount(async () => {
-        status = await fetchStatus();
-        tasks = await fetchTasks();
+  // Logs page state
+  let currentRoute = typeof window !== 'undefined' ? window.location.pathname : '/'
+  let logsTaskId = null
+  let logsContent = []
+  let logsLoading = false
 
-        // Connect to SSE
-        eventSource = createEventSource();
-        eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            handleEvent(data);
-        };
-    });
-
-    onDestroy(() => {
-        if (eventSource) {
-            eventSource.close();
-        }
-    });
-
-    function handleEvent(event) {
-        if (event.type === 'status_update') {
-            status = event.data;
-        } else if (event.type === 'task_update') {
-            const idx = tasks.findIndex(t => t.id === event.data.id);
-            if (idx >= 0) {
-                tasks[idx] = event.data;
-                tasks = tasks;
-            }
-        }
+  onMount(async () => {
+    if (currentRoute.startsWith('/logs/')) {
+      logsTaskId = decodeURIComponent(currentRoute.replace('/logs/', ''))
+      await loadLogs()
+    } else {
+      await loadData()
+      setupSSE()
     }
+  })
 
-    function statusEmoji(s) {
-        switch (s) {
-            case 'not_started': return '🔴';
-            case 'in_progress': return '🟡';
-            case 'complete': return '🟢';
-            default: return '⚪';
-        }
+  onDestroy(() => {
+    if (eventSource) {
+      eventSource.close()
     }
+  })
+
+  async function loadData() {
+    const results = await Promise.all([
+      fetchStatus(),
+      fetchBatchStatus().catch(() => ({ running: false, paused: false, auto: false })),
+      fetchAgents().catch(() => []),
+      fetchPRs().catch(() => []),
+      fetchGroups().catch(() => []),
+    ])
+    status = results[0]
+    batchStatus = results[1]
+    agents = results[2]
+    prs = results[3]
+    groups = results[4]
+  }
+
+  async function loadLogs() {
+    logsLoading = true
+    try {
+      const data = await fetchAgentLogs(logsTaskId)
+      logsContent = data.lines || []
+    } catch (e) {
+      logsContent = ['Error loading logs: ' + e.message]
+    }
+    logsLoading = false
+  }
+
+  function setupSSE() {
+    eventSource = createEventSource()
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      handleEvent(data)
+    }
+    eventSource.onerror = () => {
+      setTimeout(setupSSE, 5000)
+    }
+  }
+
+  function handleEvent(event) {
+    switch (event.type) {
+      case 'status_update':
+        status = event.data
+        break
+      case 'batch_update':
+        batchStatus = event.data
+        break
+      case 'agent_update':
+        const idx = agents.findIndex(a => a.task_id === event.data.task_id)
+        if (idx >= 0) {
+          agents[idx] = { ...agents[idx], ...event.data }
+          agents = agents
+        } else {
+          agents = [...agents, event.data]
+        }
+        break
+      case 'pr_update':
+        if (event.data.status === 'merged') {
+          prs = prs.filter(p => p.pr_number !== event.data.pr_number)
+        }
+        break
+      case 'group_update':
+        const gIdx = groups.findIndex(g => g.name === event.data.name)
+        if (gIdx >= 0) {
+          groups[gIdx].priority = event.data.priority
+          groups = groups
+        }
+        break
+    }
+  }
+
+  async function handleBatchAction(action) {
+    switch (action) {
+      case 'start': await batchStart(); break
+      case 'stop': await batchStop(); break
+      case 'pause': await batchPause(); break
+      case 'resume': await batchResume(); break
+      case 'auto': await batchToggleAuto(); break
+    }
+  }
+
+  async function handleAgentAction(taskId, action) {
+    if (action === 'stop') {
+      await stopAgent(taskId)
+    } else if (action === 'resume') {
+      await resumeAgent(taskId)
+    }
+  }
+
+  async function handleMergePR(prNumber) {
+    await mergePR(prNumber)
+  }
+
+  async function handlePriorityChange(name, priority) {
+    await setGroupPriority(name, priority)
+    groups = await fetchGroups()
+  }
 </script>
 
-<main>
-    <header>
-        <h1>ERP Orchestrator</h1>
-        <div class="stats">
-            <span>Total: {status.total}</span>
-            <span>🔴 {status.not_started}</span>
-            <span>🟡 {status.in_progress}</span>
-            <span>🟢 {status.complete}</span>
-            <span>Agents: {status.agents_running}</span>
-        </div>
+{#if logsTaskId}
+  <div class="logs-page">
+    <header class="logs-header">
+      <a href="/" class="back-btn">← Back</a>
+      <h1>Logs: {logsTaskId}</h1>
     </header>
+    <div class="logs-content">
+      {#if logsLoading}
+        <p>Loading...</p>
+      {:else}
+        {#each logsContent as line}
+          <div class="log-line">{line}</div>
+        {/each}
+      {/if}
+    </div>
+  </div>
+{:else}
+  <div class="app" class:desktop={typeof window !== 'undefined' && window.innerWidth >= 768}>
+    <BottomNav {activeTab} onTabChange={(tab) => activeTab = tab} />
 
-    <section class="tasks">
-        <h2>Tasks</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Title</th>
-                    <th>Status</th>
-                    <th>Priority</th>
-                </tr>
-            </thead>
-            <tbody>
-                {#each tasks as task}
-                    <tr>
-                        <td>{task.id}</td>
-                        <td>{task.title}</td>
-                        <td>{statusEmoji(task.status)}</td>
-                        <td>{task.priority || '-'}</td>
-                    </tr>
-                {/each}
-            </tbody>
-        </table>
-    </section>
-</main>
+    <main class="content">
+      {#if activeTab === 'dashboard'}
+        <Dashboard {status} {batchStatus} onBatchAction={handleBatchAction} />
+      {:else if activeTab === 'agents'}
+        <Agents {agents} onAgentAction={handleAgentAction} />
+      {:else if activeTab === 'prs'}
+        <PRs {prs} onMerge={handleMergePR} />
+      {:else if activeTab === 'groups'}
+        <Groups {groups} onPriorityChange={handlePriorityChange} />
+      {/if}
+    </main>
+  </div>
+{/if}
 
 <style>
-    main {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 1rem;
-        font-family: system-ui, sans-serif;
+  :global(body) {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f5f5;
+  }
+
+  .app {
+    min-height: 100vh;
+    padding-bottom: 72px;
+  }
+
+  .content {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  @media (min-width: 768px) {
+    .app {
+      display: flex;
+      padding-bottom: 0;
     }
 
-    header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 2rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid #ddd;
+    .content {
+      flex: 1;
+      margin-left: 80px;
+      max-width: none;
+      padding: 16px;
     }
+  }
 
-    .stats {
-        display: flex;
-        gap: 1rem;
-    }
+  .logs-page {
+    min-height: 100vh;
+    background: #1e1e1e;
+    color: #d4d4d4;
+  }
 
-    .stats span {
-        padding: 0.5rem 1rem;
-        background: #f5f5f5;
-        border-radius: 4px;
-    }
+  .logs-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: #2d2d2d;
+    border-bottom: 1px solid #404040;
+  }
 
-    table {
-        width: 100%;
-        border-collapse: collapse;
-    }
+  .logs-header h1 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: normal;
+  }
 
-    th, td {
-        text-align: left;
-        padding: 0.75rem;
-        border-bottom: 1px solid #eee;
-    }
+  .back-btn {
+    color: #569cd6;
+    text-decoration: none;
+  }
 
-    th {
-        background: #f9f9f9;
-        font-weight: 600;
-    }
+  .logs-content {
+    padding: 16px;
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-x: auto;
+  }
 
-    tr:hover {
-        background: #f5f5f5;
-    }
+  .log-line {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
 </style>

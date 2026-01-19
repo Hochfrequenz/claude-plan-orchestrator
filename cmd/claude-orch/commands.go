@@ -602,6 +602,50 @@ func (a *storeAdapter) GetTask(id string) (*domain.Task, error) {
 	return a.store.GetTask(id)
 }
 
+func (a *storeAdapter) ListFlaggedPRs() ([]*api.PRRecord, error) {
+	// TODO: Implement when PR table exists
+	return []*api.PRRecord{}, nil
+}
+
+func (a *storeAdapter) GetPR(taskID string) (*api.PRRecord, error) {
+	// TODO: Implement when PR table exists
+	return nil, fmt.Errorf("not found")
+}
+
+func (a *storeAdapter) UpdatePRStatus(taskID string, status string) error {
+	// TODO: Implement when PR table exists
+	return nil
+}
+
+func (a *storeAdapter) GetGroupPriorities() (map[string]int, error) {
+	return a.store.GetGroupPriorities()
+}
+
+func (a *storeAdapter) SetGroupPriority(group string, priority int) error {
+	return a.store.SetGroupPriority(group, priority)
+}
+
+func (a *storeAdapter) RemoveGroupPriority(group string) error {
+	return a.store.RemoveGroupPriority(group)
+}
+
+func (a *storeAdapter) GetGroupsWithTaskCounts() ([]api.GroupStats, error) {
+	stats, err := a.store.GetGroupsWithTaskCounts()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]api.GroupStats, len(stats))
+	for i, s := range stats {
+		result[i] = api.GroupStats{
+			Name:      s.Name,
+			Priority:  s.Priority,
+			Total:     s.Total,
+			Completed: s.Completed,
+		}
+	}
+	return result, nil
+}
+
 // agentStoreAdapter wraps taskstore.Store to implement executor.AgentStore
 type agentStoreAdapter struct {
 	store *taskstore.Store

@@ -81,3 +81,31 @@ func (m *mockStore) GetTask(id string) (*domain.Task, error) {
 	}
 	return nil, nil
 }
+
+func (m *mockStore) ListFlaggedPRs() ([]*PRRecord, error) {
+	return []*PRRecord{}, nil
+}
+
+func (m *mockStore) GetPR(taskID string) (*PRRecord, error) {
+	return nil, nil
+}
+
+func (m *mockStore) UpdatePRStatus(taskID string, status string) error {
+	return nil
+}
+
+func (m *mockStore) GetGroupPriorities() (map[string]int, error) {
+	return map[string]int{}, nil
+}
+
+func (m *mockStore) SetGroupPriority(group string, priority int) error {
+	return nil
+}
+
+func (m *mockStore) RemoveGroupPriority(group string) error {
+	return nil
+}
+
+func (m *mockStore) GetGroupsWithTaskCounts() ([]GroupStats, error) {
+	return []GroupStats{}, nil
+}

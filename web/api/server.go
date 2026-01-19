@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/executor"
@@ -18,6 +19,31 @@ import (
 type Store interface {
 	ListTasks(opts interface{}) ([]*domain.Task, error)
 	GetTask(id string) (*domain.Task, error)
+	ListFlaggedPRs() ([]*PRRecord, error)
+	GetPR(taskID string) (*PRRecord, error)
+	UpdatePRStatus(taskID string, status string) error
+	GetGroupPriorities() (map[string]int, error)
+	SetGroupPriority(group string, priority int) error
+	RemoveGroupPriority(group string) error
+	GetGroupsWithTaskCounts() ([]GroupStats, error)
+}
+
+// PRRecord represents a PR flagged for review
+type PRRecord struct {
+	TaskID     string
+	PRNumber   int
+	Title      string
+	FlagReason string
+	CreatedAt  time.Time
+	Status     string
+}
+
+// GroupStats represents a group with task counts
+type GroupStats struct {
+	Name      string
+	Priority  int
+	Total     int
+	Completed int
 }
 
 // Server is the HTTP API server
@@ -83,9 +109,48 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/batch/resume", s.batchResumeHandler())
 	s.mux.HandleFunc("/api/batch/auto", s.batchAutoHandler())
 
-	// Static files (embedded Svelte build output)
+	// PR routes
+	s.mux.HandleFunc("/api/prs", s.listPRsHandler())
+	s.mux.Handle("/api/prs/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/merge") {
+			s.mergePRHandler().ServeHTTP(w, r)
+		} else {
+			writeError(w, http.StatusNotFound, "not found")
+		}
+	}))
+
+	// Group priority routes
+	s.mux.HandleFunc("/api/groups", s.listGroupsHandler())
+	s.mux.Handle("/api/groups/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/priority") {
+			switch r.Method {
+			case http.MethodPut:
+				s.setGroupPriorityHandler().ServeHTTP(w, r)
+			case http.MethodDelete:
+				s.deleteGroupPriorityHandler().ServeHTTP(w, r)
+			default:
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			}
+		} else {
+			writeError(w, http.StatusNotFound, "not found")
+		}
+	}))
+
+	// Static files with SPA fallback
 	buildFS, _ := fs.Sub(ui.BuildFS, "build")
-	s.mux.Handle("/", http.FileServer(http.FS(buildFS)))
+	fileServer := http.FileServer(http.FS(buildFS))
+	s.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Try to serve the file
+		path := r.URL.Path
+		if path != "/" && !strings.HasPrefix(path, "/api/") {
+			// Check if file exists
+			if _, err := fs.Stat(buildFS, strings.TrimPrefix(path, "/")); err != nil {
+				// File doesn't exist, serve index.html for SPA routing
+				r.URL.Path = "/"
+			}
+		}
+		fileServer.ServeHTTP(w, r)
+	}))
 }
 
 // Start starts the HTTP server

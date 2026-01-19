@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +57,25 @@ type BatchStatusResponse struct {
 	Running bool `json:"running"`
 	Paused  bool `json:"paused"`
 	Auto    bool `json:"auto"`
+}
+
+// PRResponse is the API response for a PR
+type PRResponse struct {
+	TaskID     string `json:"task_id"`
+	PRNumber   int    `json:"pr_number"`
+	Title      string `json:"title"`
+	FlagReason string `json:"flag_reason"`
+	CreatedAt  string `json:"created_at"`
+	Status     string `json:"status"`
+	URL        string `json:"url"`
+}
+
+// GroupResponse is the API response for a group
+type GroupResponse struct {
+	Name      string `json:"name"`
+	Priority  int    `json:"priority"`
+	Total     int    `json:"total"`
+	Completed int    `json:"completed"`
 }
 
 func taskToResponse(t *domain.Task) TaskResponse {
@@ -486,5 +508,157 @@ func (s *Server) batchAutoHandler() http.HandlerFunc {
 		s.Broadcast(SSEEvent{Type: "batch_update", Data: resp})
 
 		writeJSON(w, map[string]bool{"auto": resp.Auto})
+	}
+}
+
+func (s *Server) listPRsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		prs, err := s.store.ListFlaggedPRs()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		resp := make([]PRResponse, 0, len(prs))
+		for _, pr := range prs {
+			resp = append(resp, PRResponse{
+				TaskID:     pr.TaskID,
+				PRNumber:   pr.PRNumber,
+				Title:      pr.Title,
+				FlagReason: pr.FlagReason,
+				CreatedAt:  pr.CreatedAt.Format(time.RFC3339),
+				Status:     pr.Status,
+				URL:        fmt.Sprintf("https://github.com/OWNER/REPO/pull/%d", pr.PRNumber),
+			})
+		}
+
+		writeJSON(w, resp)
+	}
+}
+
+func (s *Server) mergePRHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		if s.prbot == nil {
+			writeError(w, http.StatusServiceUnavailable, "PR bot not available")
+			return
+		}
+
+		// Extract PR number: /api/prs/{prNumber}/merge
+		path := strings.TrimPrefix(r.URL.Path, "/api/prs/")
+		path = strings.TrimSuffix(path, "/merge")
+		prNumber, err := strconv.Atoi(path)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid PR number")
+			return
+		}
+
+		if err := s.prbot.MergePR(prNumber); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		s.Broadcast(SSEEvent{Type: "pr_update", Data: map[string]interface{}{
+			"pr_number": prNumber,
+			"status":    "merged",
+		}})
+
+		writeJSON(w, map[string]string{"status": "merged"})
+	}
+}
+
+func (s *Server) listGroupsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		groups, err := s.store.GetGroupsWithTaskCounts()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		resp := make([]GroupResponse, 0, len(groups))
+		for _, g := range groups {
+			resp = append(resp, GroupResponse{
+				Name:      g.Name,
+				Priority:  g.Priority,
+				Total:     g.Total,
+				Completed: g.Completed,
+			})
+		}
+
+		writeJSON(w, resp)
+	}
+}
+
+func (s *Server) setGroupPriorityHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Extract group name: /api/groups/{name}/priority
+		path := strings.TrimPrefix(r.URL.Path, "/api/groups/")
+		path = strings.TrimSuffix(path, "/priority")
+		groupName := path
+
+		var req struct {
+			Priority int `json:"priority"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		if err := s.store.SetGroupPriority(groupName, req.Priority); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		s.Broadcast(SSEEvent{Type: "group_update", Data: map[string]interface{}{
+			"name":     groupName,
+			"priority": req.Priority,
+		}})
+
+		writeJSON(w, map[string]string{"status": "updated"})
+	}
+}
+
+func (s *Server) deleteGroupPriorityHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Extract group name: /api/groups/{name}/priority
+		path := strings.TrimPrefix(r.URL.Path, "/api/groups/")
+		path = strings.TrimSuffix(path, "/priority")
+		groupName := path
+
+		if err := s.store.RemoveGroupPriority(groupName); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		s.Broadcast(SSEEvent{Type: "group_update", Data: map[string]interface{}{
+			"name":     groupName,
+			"priority": -1,
+		}})
+
+		writeJSON(w, map[string]string{"status": "removed"})
 	}
 }
