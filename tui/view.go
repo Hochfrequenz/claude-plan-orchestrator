@@ -519,8 +519,21 @@ func (m Model) renderQueued() string {
 				blocking = "stalled (reset needed)"
 			}
 			if blocking == "" {
-				// Blocked by implicit module dependency or in-progress task
-				blocking = "dependency"
+				// Debug: show dependency state
+				var depInfo []string
+				for _, dep := range task.DependsOn {
+					depStr := dep.String()
+					if m.completedTasks[depStr] {
+						depInfo = append(depInfo, depStr+"=✓")
+					} else {
+						depInfo = append(depInfo, depStr+"=✗")
+					}
+				}
+				if len(depInfo) > 0 {
+					blocking = fmt.Sprintf("deps:[%s] completed:%d", strings.Join(depInfo, ","), len(m.completedTasks))
+				} else {
+					blocking = fmt.Sprintf("no deps, completed:%d", len(m.completedTasks))
+				}
 			}
 			line := fmt.Sprintf("  ○ %-15s %-20s %s",
 				task.ID.String(), truncate(task.Title, 20), warningStyle.Render(fmt.Sprintf("(waiting: %s)", blocking)))
