@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"fmt"
+	"os"
 	"sort"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
@@ -69,6 +71,7 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 	}
 
 	var ready []*domain.Task
+	var debugSkipped []string
 
 	for _, task := range s.tasks {
 		// Skip tasks not in active tier (if priorities are configured)
@@ -79,9 +82,20 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 			}
 		}
 
-		if task.IsReady(s.completed) && !s.dependsOnAny(task, inProgress) {
+		isReady := task.IsReady(s.completed)
+		dependsOnInProgress := s.dependsOnAny(task, inProgress)
+
+		if isReady && !dependsOnInProgress {
 			ready = append(ready, task)
+		} else if task.ID.String() == "cli-tui-implementation/TUI06" {
+			// Debug: why is TUI06 not ready?
+			debugSkipped = append(debugSkipped, fmt.Sprintf("TUI06: isReady=%v, dependsOnInProgress=%v, status=%s", isReady, dependsOnInProgress, task.Status))
 		}
+	}
+
+	// Log debug info for TUI06 if it was skipped
+	if len(debugSkipped) > 0 {
+		fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: %v\n", debugSkipped)
 	}
 
 	// Sort by priority
