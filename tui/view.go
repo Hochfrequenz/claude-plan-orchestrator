@@ -89,22 +89,16 @@ func (m Model) View() string {
 
 	var b strings.Builder
 
-	// Header
-	header := fmt.Sprintf(" Claude Plan Orchestrator │ Active: %d/%d │ Tasks: %d │ Completed today: %d │ Flagged: %d ",
-		m.activeCount, m.maxActive, len(m.allTasks), m.completedToday, len(m.flagged))
-
-	// Add executor type indicator
+	// Header - title changes based on executor type
+	title := "Claude Code Orchestrator"
 	if m.agentManager != nil {
 		execType := string(m.agentManager.GetExecutorType())
-		if execType == "" {
-			execType = "claude-code"
+		if execType == "opencode" {
+			title = "OpenCode Orchestrator"
 		}
-		// Shorten for display
-		if execType == "claude-code" {
-			execType = "claude"
-		}
-		header = fmt.Sprintf("%s│ %s ", header, execType)
 	}
+	header := fmt.Sprintf(" %s │ Active: %d/%d │ Tasks: %d │ Completed today: %d │ Flagged: %d ",
+		title, m.activeCount, m.maxActive, len(m.allTasks), m.completedToday, len(m.flagged))
 
 	// Add update indicator to header
 	if m.updateInProgress {
