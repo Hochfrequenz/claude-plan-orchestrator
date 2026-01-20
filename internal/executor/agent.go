@@ -546,9 +546,15 @@ func (a *Agent) streamOutput(stdout, stderr io.ReadCloser) {
 	var errMsg string
 	if err != nil {
 		a.Status = AgentFailed
-		a.Error = err
+		// Try to extract meaningful error from output (e.g., OpenCode API errors)
+		if extractedErr := a.extractErrorFromOutput(); extractedErr != "" {
+			a.Error = fmt.Errorf("%s: %s", err.Error(), extractedErr)
+			errMsg = a.Error.Error()
+		} else {
+			a.Error = err
+			errMsg = err.Error()
+		}
 		newStatus = AgentFailed
-		errMsg = err.Error()
 	} else {
 		a.Status = AgentCompleted
 		newStatus = AgentCompleted
@@ -567,6 +573,59 @@ func (a *Agent) streamOutput(stdout, stderr io.ReadCloser) {
 	if callback != nil {
 		callback(a, newStatus, errMsg)
 	}
+}
+
+// extractErrorFromOutput scans output lines for error messages from executors
+// (e.g., OpenCode API errors, Claude Code errors) and returns a human-readable message.
+// Must be called with a.mu held (or after output is finalized).
+func (a *Agent) extractErrorFromOutput() string {
+	// Scan output in reverse (errors usually at the end)
+	for i := len(a.Output) - 1; i >= 0 && i >= len(a.Output)-20; i-- {
+		line := a.Output[i]
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		// Try to parse OpenCode error format: {"type":"error",...}
+		var openCodeErr struct {
+			Type  string `json:"type"`
+			Error struct {
+				Name string `json:"name"`
+				Data struct {
+					Message string `json:"message"`
+				} `json:"data"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &openCodeErr); err == nil && openCodeErr.Type == "error" {
+			msg := openCodeErr.Error.Data.Message
+			if msg == "" {
+				msg = openCodeErr.Error.Name
+			}
+			// Extract the core message from nested JSON if present
+			if strings.Contains(msg, "CreditsError") || strings.Contains(msg, "No payment method") {
+				return "OpenCode billing error: No payment method configured"
+			}
+			if strings.Contains(msg, "Unauthorized") {
+				return "OpenCode authentication error: " + msg
+			}
+			if msg != "" {
+				return msg
+			}
+		}
+
+		// Try Claude Code error format
+		var claudeErr struct {
+			Type    string `json:"type"`
+			Subtype string `json:"subtype"`
+			Error   string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &claudeErr); err == nil && claudeErr.Type == "error" {
+			if claudeErr.Error != "" {
+				return claudeErr.Error
+			}
+		}
+	}
+	return ""
 }
 
 // CheckEpicStatus reads the epic file in the worktree and returns its current status
