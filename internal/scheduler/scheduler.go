@@ -133,11 +133,17 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 
 	for _, task := range ready {
 		if len(selected) >= limit {
+			if task.ID.String() == "cli-tui-implementation/TUI06" {
+				fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: TUI06 skipped due to limit, selected=%d, limit=%d\n", len(selected), limit)
+			}
 			break
 		}
 
 		// Check if this task conflicts with already selected tasks
 		if s.conflictsWithSelected(task, selectedIDs, selectedSequences) {
+			if task.ID.String() == "cli-tui-implementation/TUI06" {
+				fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: TUI06 filtered by conflictsWithSelected, selectedIDs=%v, selectedSequences=%v\n", selectedIDs, selectedSequences)
+			}
 			continue
 		}
 
@@ -148,6 +154,18 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 		if task.ID.EpicNum > selectedSequences[seqKey] {
 			selectedSequences[seqKey] = task.ID.EpicNum
 		}
+		if task.ID.String() == "cli-tui-implementation/TUI06" {
+			fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: TUI06 SELECTED successfully\n")
+		}
+	}
+
+	// Debug: print all selected task IDs
+	if len(selected) > 0 {
+		var ids []string
+		for _, t := range selected {
+			ids = append(ids, t.ID.String())
+		}
+		fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: returning %d tasks: %v\n", len(selected), ids)
 	}
 
 	return selected
