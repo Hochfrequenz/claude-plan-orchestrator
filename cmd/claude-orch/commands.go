@@ -36,6 +36,7 @@ var (
 	syncIssuesOnly   bool
 	cleanupDryRun    bool
 	cleanupAll       bool
+	tuiExecutor      string
 )
 
 func init() {
@@ -93,6 +94,7 @@ func init() {
 		Short: "Launch TUI dashboard",
 		RunE:  runTUI,
 	}
+	tuiCmd.Flags().StringVar(&tuiExecutor, "executor", "", "executor type: claude-code (default) or opencode")
 	rootCmd.AddCommand(tuiCmd)
 
 	// serve command
@@ -400,6 +402,22 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	agentMgr := executor.NewAgentManager(cfg.General.MaxParallelAgents)
 	agentStoreAdp := &agentStoreAdapter{store: store}
 	agentMgr.SetStore(agentStoreAdp)
+
+	// Set executor type (CLI flag takes precedence over config)
+	executorType := cfg.General.Executor
+	if tuiExecutor != "" {
+		executorType = tuiExecutor
+	}
+	// Default to claude-code if not set
+	if executorType == "" {
+		executorType = config.ExecutorClaudeCode
+	}
+	// Validate executor type
+	if !config.IsValidExecutor(executorType) {
+		return fmt.Errorf("invalid executor '%s': must be '%s' or '%s'",
+			executorType, config.ExecutorClaudeCode, config.ExecutorOpenCode)
+	}
+	agentMgr.SetExecutorType(executor.ExecutorType(executorType))
 
 	// Create syncer for updating README and epic status on completion
 	plansDir := cfg.General.ProjectRoot + "/docs/plans"

@@ -23,6 +23,14 @@ import (
 // This ensures the same task always gets the same session ID for resume capability
 var orchestratorNamespace = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
+// ExecutorType defines the AI coding agent to use
+type ExecutorType string
+
+const (
+	ExecutorClaudeCode ExecutorType = "claude-code"
+	ExecutorOpenCode   ExecutorType = "opencode"
+)
+
 // AgentStatus represents the status of an agent
 type AgentStatus string
 
@@ -51,8 +59,9 @@ type Agent struct {
 	Prompt       string
 	Output       []string
 	Error        error
-	SessionID    string // Claude Code session ID for resume capability
-	BuildPoolURL string // URL for build pool coordinator (if configured)
+	SessionID    string       // Claude Code session ID for resume capability
+	BuildPoolURL string       // URL for build pool coordinator (if configured)
+	ExecutorType ExecutorType // Which AI coding agent to use (claude-code or opencode)
 
 	// Token usage from Claude session
 	TokensInput  int
@@ -116,6 +125,7 @@ type AgentManager struct {
 	store         AgentStore
 	syncer        *isync.Syncer
 	buildPoolURL  string
+	executorType  ExecutorType // Default executor for new agents
 	mu            sync.RWMutex
 
 	// Database write queue for serializing DB operations
@@ -216,6 +226,23 @@ func (m *AgentManager) GetBuildPoolURL() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.buildPoolURL
+}
+
+// SetExecutorType sets the default executor type for new agents
+func (m *AgentManager) SetExecutorType(executorType ExecutorType) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.executorType = executorType
+}
+
+// GetExecutorType returns the default executor type
+func (m *AgentManager) GetExecutorType() ExecutorType {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.executorType == "" {
+		return ExecutorClaudeCode
+	}
+	return m.executorType
 }
 
 // SetMaxConcurrent updates the maximum number of concurrent agents
@@ -343,7 +370,7 @@ func (m *AgentManager) CanStart() bool {
 	return m.RunningCount() < m.maxConcurrent
 }
 
-// Start starts an agent with Claude Code
+// Start starts an agent with the configured executor (Claude Code or OpenCode)
 func (a *Agent) Start(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -361,7 +388,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		a.ID = fmt.Sprintf("%s-%d", a.TaskID.String(), time.Now().UnixNano())
 	}
 
-	// Generate session ID for Claude Code resume capability
+	// Generate session ID for resume capability
 	// Use UUID v5 (deterministic) so same task always gets same session ID
 	if a.SessionID == "" {
 		a.SessionID = uuid.NewSHA1(orchestratorNamespace, []byte(a.TaskID.String())).String()
@@ -378,25 +405,8 @@ func (a *Agent) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
 
-	// Build claude command arguments
-	args := []string{
-		"--print",                        // Non-interactive mode
-		"--verbose",                      // Required for stream-json output
-		"--dangerously-skip-permissions", // Skip permission prompts
-		"--output-format", "stream-json", // Stream output as JSON for realtime updates
-		"--session-id", a.SessionID,      // Named session for resume capability
-	}
-
-	// Add MCP config if available (from project's .mcp.json + orchestrator MCPs)
-	if mcpConfig := a.generateMCPConfig(); mcpConfig != "" {
-		args = append(args, "--mcp-config", mcpConfig)
-	}
-
-	// Add prompt
-	args = append(args, "-p", a.Prompt)
-
-	a.cmd = exec.CommandContext(ctx, "claude", args...)
-	a.cmd.Dir = a.WorktreePath
+	// Build command based on executor type
+	a.cmd = a.buildCommand(ctx)
 
 	// Capture output
 	stdout, err := a.cmd.StdoutPipe()
@@ -411,9 +421,13 @@ func (a *Agent) Start(ctx context.Context) error {
 	}
 
 	// Start the process
+	execName := "claude"
+	if a.ExecutorType == ExecutorOpenCode {
+		execName = "opencode"
+	}
 	if err := a.cmd.Start(); err != nil {
 		a.logFile.Close()
-		return fmt.Errorf("starting claude: %w", err)
+		return fmt.Errorf("starting %s: %w", execName, err)
 	}
 
 	// Capture PID
@@ -433,6 +447,62 @@ func (a *Agent) Start(ctx context.Context) error {
 	go a.streamOutput(stdout, stderr)
 
 	return nil
+}
+
+// buildCommand creates the appropriate command based on executor type
+func (a *Agent) buildCommand(ctx context.Context) *exec.Cmd {
+	switch a.ExecutorType {
+	case ExecutorOpenCode:
+		return a.buildOpenCodeCommand(ctx)
+	default:
+		return a.buildClaudeCodeCommand(ctx)
+	}
+}
+
+// buildClaudeCodeCommand builds the command for Claude Code
+func (a *Agent) buildClaudeCodeCommand(ctx context.Context) *exec.Cmd {
+	args := []string{
+		"--print",                        // Non-interactive mode
+		"--verbose",                      // Required for stream-json output
+		"--dangerously-skip-permissions", // Skip permission prompts
+		"--output-format", "stream-json", // Stream output as JSON for realtime updates
+		"--session-id", a.SessionID,      // Named session for resume capability
+	}
+
+	// Add MCP config if available (from project's .mcp.json + orchestrator MCPs)
+	if mcpConfig := a.generateMCPConfig(); mcpConfig != "" {
+		args = append(args, "--mcp-config", mcpConfig)
+	}
+
+	// Add prompt
+	args = append(args, "-p", a.Prompt)
+
+	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd.Dir = a.WorktreePath
+	return cmd
+}
+
+// buildOpenCodeCommand builds the command for OpenCode
+func (a *Agent) buildOpenCodeCommand(ctx context.Context) *exec.Cmd {
+	args := []string{
+		"run",            // Non-interactive mode
+		"--format", "json", // JSON output for parsing
+		"-s", a.SessionID,  // Session ID for resume capability
+	}
+
+	// Add prompt as final argument
+	args = append(args, a.Prompt)
+
+	cmd := exec.CommandContext(ctx, "opencode", args...)
+	cmd.Dir = a.WorktreePath
+
+	// Set up environment for MCP config
+	cmd.Env = os.Environ()
+	if mcpConfigPath := a.generateOpenCodeMCPConfig(); mcpConfigPath != "" {
+		cmd.Env = append(cmd.Env, "OPENCODE_CONFIG="+mcpConfigPath)
+	}
+
+	return cmd
 }
 
 func (a *Agent) streamOutput(stdout, stderr io.ReadCloser) {
@@ -599,7 +669,7 @@ func toStatus(s string) domain.TaskStatus {
 	}
 }
 
-// Resume restarts the agent by resuming its Claude Code session
+// Resume restarts the agent by resuming its session
 // This continues from where the previous session left off
 func (a *Agent) Resume(ctx context.Context) error {
 	a.mu.Lock()
@@ -643,15 +713,8 @@ func (a *Agent) Resume(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
 
-	// Build claude command with --resume to continue the session
-	a.cmd = exec.CommandContext(ctx, "claude",
-		"--print",                        // Non-interactive mode
-		"--verbose",                      // Required for stream-json output
-		"--dangerously-skip-permissions", // Skip permission prompts
-		"--output-format", "stream-json", // Stream output as JSON for realtime updates
-		"--resume", a.SessionID,          // Resume the named session
-	)
-	a.cmd.Dir = a.WorktreePath
+	// Build resume command based on executor type
+	a.cmd = a.buildResumeCommand(ctx)
 
 	// Capture output
 	stdout, err := a.cmd.StdoutPipe()
@@ -666,9 +729,13 @@ func (a *Agent) Resume(ctx context.Context) error {
 	}
 
 	// Start the process
+	execName := "claude"
+	if a.ExecutorType == ExecutorOpenCode {
+		execName = "opencode"
+	}
 	if err := a.cmd.Start(); err != nil {
 		a.logFile.Close()
-		return fmt.Errorf("starting claude: %w", err)
+		return fmt.Errorf("starting %s: %w", execName, err)
 	}
 
 	// Update state
@@ -689,6 +756,47 @@ func (a *Agent) Resume(ctx context.Context) error {
 	go a.streamOutput(stdout, stderr)
 
 	return nil
+}
+
+// buildResumeCommand creates the appropriate resume command based on executor type
+func (a *Agent) buildResumeCommand(ctx context.Context) *exec.Cmd {
+	switch a.ExecutorType {
+	case ExecutorOpenCode:
+		return a.buildOpenCodeResumeCommand(ctx)
+	default:
+		return a.buildClaudeCodeResumeCommand(ctx)
+	}
+}
+
+// buildClaudeCodeResumeCommand builds the resume command for Claude Code
+func (a *Agent) buildClaudeCodeResumeCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "claude",
+		"--print",                        // Non-interactive mode
+		"--verbose",                      // Required for stream-json output
+		"--dangerously-skip-permissions", // Skip permission prompts
+		"--output-format", "stream-json", // Stream output as JSON for realtime updates
+		"--resume", a.SessionID,          // Resume the named session
+	)
+	cmd.Dir = a.WorktreePath
+	return cmd
+}
+
+// buildOpenCodeResumeCommand builds the resume command for OpenCode
+func (a *Agent) buildOpenCodeResumeCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "opencode",
+		"run",              // Non-interactive mode
+		"--format", "json", // JSON output for parsing
+		"-c",               // Continue last session
+	)
+	cmd.Dir = a.WorktreePath
+
+	// Set up environment for MCP config
+	cmd.Env = os.Environ()
+	if mcpConfigPath := a.generateOpenCodeMCPConfig(); mcpConfigPath != "" {
+		cmd.Env = append(cmd.Env, "OPENCODE_CONFIG="+mcpConfigPath)
+	}
+
+	return cmd
 }
 
 // Stop gracefully stops the agent
@@ -823,6 +931,106 @@ func findBuildMCP() string {
 	}
 
 	return ""
+}
+
+// generateOpenCodeMCPConfig creates an MCP config file in OpenCode's format.
+// Returns the path to the generated config file, or empty string if no MCPs are configured.
+func (a *Agent) generateOpenCodeMCPConfig() string {
+	mcpServers := make(map[string]interface{})
+
+	// 1. Load project's .mcp.json if it exists (convert from Claude Code format)
+	projectConfigPath := filepath.Join(a.WorktreePath, ".mcp.json")
+	if data, err := os.ReadFile(projectConfigPath); err == nil {
+		var projectConfig struct {
+			MCPServers map[string]interface{} `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &projectConfig); err == nil {
+			for name, configRaw := range projectConfig.MCPServers {
+				// Convert Claude Code format to OpenCode format
+				if configMap, ok := configRaw.(map[string]interface{}); ok {
+					openCodeServer := map[string]interface{}{
+						"type":    "local",
+						"enabled": true,
+					}
+
+					// Convert command (string or []string) to []string
+					if cmd, ok := configMap["command"].(string); ok {
+						openCodeServer["command"] = []string{cmd}
+					} else if cmdList, ok := configMap["command"].([]interface{}); ok {
+						var cmdStrings []string
+						for _, c := range cmdList {
+							if s, ok := c.(string); ok {
+								cmdStrings = append(cmdStrings, s)
+							}
+						}
+						openCodeServer["command"] = cmdStrings
+					}
+
+					// Append args to command
+					if args, ok := configMap["args"].([]interface{}); ok {
+						if cmdList, ok := openCodeServer["command"].([]string); ok {
+							for _, arg := range args {
+								if s, ok := arg.(string); ok {
+									cmdList = append(cmdList, s)
+								}
+							}
+							openCodeServer["command"] = cmdList
+						}
+					}
+
+					// Copy env to environment
+					if env, ok := configMap["env"].(map[string]interface{}); ok {
+						envMap := make(map[string]string)
+						for k, v := range env {
+							if s, ok := v.(string); ok {
+								envMap[k] = s
+							}
+						}
+						openCodeServer["environment"] = envMap
+					}
+
+					mcpServers[name] = openCodeServer
+				}
+			}
+		}
+	}
+
+	// 2. Add build-mcp if available
+	buildMCPPath := findBuildMCP()
+	if buildMCPPath != "" && a.BuildPoolURL != "" {
+		mcpServers["build-pool"] = map[string]interface{}{
+			"type":    "local",
+			"command": []string{buildMCPPath},
+			"enabled": true,
+			"environment": map[string]string{
+				"BUILD_POOL_URL": a.BuildPoolURL,
+			},
+		}
+	}
+
+	// Return empty if no MCPs configured
+	if len(mcpServers) == 0 {
+		return ""
+	}
+
+	// Build OpenCode config structure
+	config := map[string]interface{}{
+		"$schema": "https://opencode.ai/config.json",
+		"mcp":     mcpServers,
+	}
+
+	configJSON, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return ""
+	}
+
+	// Write to temp file in worktree
+	configPath := filepath.Join(a.WorktreePath, ".opencode-mcp.json")
+	if err := os.WriteFile(configPath, configJSON, 0644); err != nil {
+		return ""
+	}
+
+	return configPath
 }
 
 // Duration returns how long the agent has been running

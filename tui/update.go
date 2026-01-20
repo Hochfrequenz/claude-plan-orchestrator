@@ -1577,6 +1577,7 @@ func startBatchCmd(
 				Status:       executor.AgentQueued,
 				Prompt:       prompt,
 				BuildPoolURL: agentMgr.GetBuildPoolURL(),
+				ExecutorType: agentMgr.GetExecutorType(),
 			}
 
 			// Set up status change callback if manager has persistence
@@ -2221,6 +2222,7 @@ func (m *Model) startMaintenanceTask() tea.Cmd {
 
 		if agentMgr != nil {
 			agent.BuildPoolURL = agentMgr.GetBuildPoolURL()
+			agent.ExecutorType = agentMgr.GetExecutorType()
 			agent.OnStatusChange = agentMgr.CreateStatusCallback()
 
 			if agentMgr.CanStart() {

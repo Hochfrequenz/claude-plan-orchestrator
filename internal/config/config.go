@@ -9,6 +9,12 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// Executor type constants
+const (
+	ExecutorClaudeCode = "claude-code"
+	ExecutorOpenCode   = "opencode"
+)
+
 // Config holds all application configuration
 type Config struct {
 	General       GeneralConfig       `toml:"general"`
@@ -43,6 +49,7 @@ type GeneralConfig struct {
 	WorktreeDir       string `toml:"worktree_dir"`
 	MaxParallelAgents int    `toml:"max_parallel_agents"`
 	DatabasePath      string `toml:"database_path"`
+	Executor          string `toml:"executor"` // "claude-code" (default) or "opencode"
 }
 
 // ClaudeConfig holds Claude API settings
@@ -97,6 +104,7 @@ func Default() *Config {
 			WorktreeDir:       filepath.Join(home, ".claude-orchestrator", "worktrees"),
 			MaxParallelAgents: 3,
 			DatabasePath:      filepath.Join(home, ".claude-orchestrator", "orchestrator.db"),
+			Executor:          ExecutorClaudeCode, // Default to Claude Code
 		},
 		Claude: ClaudeConfig{
 			Model:     "claude-opus-4-5-20251101",
@@ -247,6 +255,23 @@ func (c *Config) ValidateGitHubIssues() error {
 	}
 	if c.GitHubIssues.Repo == "" {
 		return fmt.Errorf("github_issues.repo is required when enabled")
+	}
+	return nil
+}
+
+// IsValidExecutor checks if an executor type is valid
+func IsValidExecutor(executor string) bool {
+	return executor == ExecutorClaudeCode || executor == ExecutorOpenCode
+}
+
+// ValidateExecutor validates the executor configuration
+func (c *Config) ValidateExecutor() error {
+	if c.General.Executor == "" {
+		return nil // Will use default
+	}
+	if !IsValidExecutor(c.General.Executor) {
+		return fmt.Errorf("invalid executor '%s': must be '%s' or '%s'",
+			c.General.Executor, ExecutorClaudeCode, ExecutorOpenCode)
 	}
 	return nil
 }
