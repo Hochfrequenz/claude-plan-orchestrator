@@ -149,6 +149,12 @@ type Model struct {
 	showGroupPriorities bool                // Toggle with 'g' key
 	groupPriorityItems  []GroupPriorityItem // Groups with their priorities
 	selectedPriorityRow int                 // Currently selected row
+
+	// Update state
+	currentVersion   string // Current running version (e.g., "v0.3.19")
+	updateAvailable  string // Latest version if update available, empty otherwise
+	updateStatus     string // Status message during update ("Downloading...", "Updated!", error)
+	updateInProgress bool   // True while downloading/installing
 }
 
 // AgentView represents an agent in the TUI
@@ -202,6 +208,7 @@ type ModelConfig struct {
 	PlanChangeChan  chan PlanSyncMsg
 	Store           *taskstore.Store  // Database store for sync operations
 	Syncer          *isync.Syncer     // Syncer for two-way sync operations
+	CurrentVersion  string            // Current version for update checking
 }
 
 // NewModel creates a new TUI model
@@ -301,6 +308,7 @@ func NewModel(cfg ModelConfig) Model {
 		store:           cfg.Store,
 		syncer:          syncer,
 		syncModal:       SyncConflictModal{Resolutions: make(map[string]string)},
+		currentVersion:  cfg.CurrentVersion,
 	}
 }
 
@@ -371,6 +379,11 @@ func (m Model) Init() tea.Cmd {
 	// Start listening for plan changes if watcher is configured
 	if m.planChangeChan != nil {
 		cmds = append(cmds, waitForPlanChange(m.planChangeChan))
+	}
+
+	// Check for updates on startup (async, non-blocking)
+	if m.currentVersion != "" {
+		cmds = append(cmds, checkUpdateCmd(m.currentVersion))
 	}
 
 	return tea.Batch(cmds...)

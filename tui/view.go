@@ -75,6 +75,10 @@ var (
 
 	dimmedWarningStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("172"))
+
+	updateStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("205")).
+		Bold(true)
 )
 
 // View renders the TUI
@@ -88,6 +92,16 @@ func (m Model) View() string {
 	// Header
 	header := fmt.Sprintf(" Claude Plan Orchestrator │ Active: %d/%d │ Tasks: %d │ Completed today: %d │ Flagged: %d ",
 		m.activeCount, m.maxActive, len(m.allTasks), m.completedToday, len(m.flagged))
+
+	// Add update indicator to header
+	if m.updateInProgress {
+		header = fmt.Sprintf("%s│ ⏳ %s ", header, m.updateStatus)
+	} else if m.updateStatus != "" {
+		header = fmt.Sprintf("%s│ %s ", header, m.updateStatus)
+	} else if m.updateAvailable != "" {
+		header = fmt.Sprintf("%s│ ⬆ Update %s [U] ", header, m.updateAvailable)
+	}
+
 	b.WriteString(headerStyle.Width(m.width).Render(header))
 	b.WriteString("\n")
 

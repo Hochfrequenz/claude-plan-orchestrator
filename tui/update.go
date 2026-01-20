@@ -24,6 +24,7 @@ import (
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/scheduler"
 	isync "github.com/hochfrequenz/claude-plan-orchestrator/internal/sync"
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/taskstore"
+	"github.com/hochfrequenz/claude-plan-orchestrator/internal/updater"
 )
 
 // TestCompleteMsg is sent when test execution completes
@@ -159,6 +160,20 @@ type SetGroupPriorityMsg struct {
 type RemoveGroupPriorityMsg struct {
 	Group string
 	Error error
+}
+
+// UpdateCheckMsg reports the result of checking for updates
+type UpdateCheckMsg struct {
+	LatestVersion string
+	NeedsUpdate   bool
+	Error         error
+}
+
+// UpdateCompleteMsg reports the result of a self-update
+type UpdateCompleteMsg struct {
+	NewVersion string
+	Success    bool
+	Error      error
 }
 
 // Update handles messages
@@ -700,6 +715,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Mouse disabled (text selection enabled)"
 				return m, tea.DisableMouse
 			}
+		case "U":
+			// Trigger self-update if update is available
+			if m.updateAvailable != "" && !m.updateInProgress {
+				m.updateInProgress = true
+				m.updateStatus = "Downloading..."
+				return m, selfUpdateCmd(m.updateAvailable)
+			} else if m.updateInProgress {
+				m.statusMsg = "Update already in progress..."
+			} else if m.updateAvailable == "" {
+				m.statusMsg = "No update available (current: " + m.currentVersion + ")"
+			}
 		}
 
 	case tea.MouseMsg:
@@ -1206,6 +1232,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.statusMsg = fmt.Sprintf("Unassigned %s (defaults to tier 0)", msg.Group)
+		}
+		return m, nil
+
+	case UpdateCheckMsg:
+		if msg.Error != nil {
+			// Silently ignore update check errors - don't disrupt user
+			m.updateStatus = ""
+		} else if msg.NeedsUpdate {
+			m.updateAvailable = msg.LatestVersion
+			m.updateStatus = ""
+		} else {
+			m.updateAvailable = ""
+			m.updateStatus = ""
+		}
+		return m, nil
+
+	case UpdateCompleteMsg:
+		m.updateInProgress = false
+		if msg.Error != nil {
+			m.updateStatus = fmt.Sprintf("Update failed: %v", msg.Error)
+			m.statusMsg = m.updateStatus
+		} else {
+			m.updateStatus = fmt.Sprintf("Updated to %s! Restart to apply.", msg.NewVersion)
+			m.statusMsg = m.updateStatus
 		}
 		return m, nil
 	}
@@ -2239,5 +2289,34 @@ func removeGroupPriorityCmd(store *taskstore.Store, group string) tea.Cmd {
 		}
 		err := store.RemoveGroupPriority(group)
 		return RemoveGroupPriorityMsg{Group: group, Error: err}
+	}
+}
+
+// checkUpdateCmd checks for available updates asynchronously
+func checkUpdateCmd(currentVersion string) tea.Cmd {
+	return func() tea.Msg {
+		latest, err := updater.CheckLatestVersion()
+		if err != nil {
+			return UpdateCheckMsg{Error: err}
+		}
+		needsUpdate := updater.NeedsUpdate(currentVersion, latest)
+		return UpdateCheckMsg{
+			LatestVersion: latest,
+			NeedsUpdate:   needsUpdate,
+		}
+	}
+}
+
+// selfUpdateCmd downloads and installs the specified version
+func selfUpdateCmd(targetVersion string) tea.Cmd {
+	return func() tea.Msg {
+		err := updater.SelfUpdate(targetVersion)
+		if err != nil {
+			return UpdateCompleteMsg{Error: err}
+		}
+		return UpdateCompleteMsg{
+			NewVersion: targetVersion,
+			Success:    true,
+		}
 	}
 }
