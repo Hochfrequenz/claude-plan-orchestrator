@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"sync"
-
-	"golang.org/x/sync/errgroup"
 )
 
 // ServerConfig defines a connection to a single orchestrator
@@ -129,20 +127,40 @@ func (mc *MultiClient) broadcastReady() {
 	}
 }
 
-// Run starts all workers concurrently and blocks until all are done or context is cancelled
+// Run starts all workers concurrently and blocks until context is cancelled
+// Each worker runs independently - one worker's failure doesn't affect others
 func (mc *MultiClient) Run() error {
-	g, ctx := errgroup.WithContext(mc.ctx)
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(mc.workers))
 
 	for _, worker := range mc.workers {
-		w := worker // capture for goroutine
-		g.Go(func() error {
-			// Use the shared context so all workers stop together if context is cancelled
-			return w.RunWithReconnectContext(ctx)
-		})
+		wg.Add(1)
+		go func(w *Worker) {
+			defer wg.Done()
+			// Each worker handles its own reconnection independently
+			if err := w.RunWithReconnectContext(mc.ctx); err != nil {
+				errCh <- fmt.Errorf("worker %s: %w", w.orchestratorName, err)
+			}
+		}(worker)
 	}
 
-	// Wait for all workers (only returns error if all workers fail)
-	return g.Wait()
+	// Wait for context cancellation
+	<-mc.ctx.Done()
+
+	// Wait for all workers to finish cleanup
+	wg.Wait()
+	close(errCh)
+
+	// Collect any errors (for logging purposes)
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%d worker(s) had errors", len(errs))
+	}
+	return nil
 }
 
 // RunWithReconnect starts all workers with automatic reconnection

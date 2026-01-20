@@ -311,6 +311,11 @@ func (w *Worker) send(msgType string, payload interface{}) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// Check connection is valid (prevents panic from race with reconnection)
+	if w.conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
 	data, err := buildprotocol.MarshalEnvelope(msgType, payload)
 	if err != nil {
 		return err
