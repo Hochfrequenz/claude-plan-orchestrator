@@ -664,7 +664,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Test worker connection (only on Dashboard tab when build pool is connected)
 			if m.activeTab == 0 && m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
 				m.statusMsg = "Testing worker..."
-				return m, testWorkerCmd(m.buildPoolURL, m.projectRoot)
+				return m, testWorkerCmd(m.buildPoolURL, m.projectRoot, m.gitDaemonPort)
 			} else if m.buildPoolStatus != "connected" {
 				m.statusMsg = "Build pool not connected"
 			}
@@ -1703,12 +1703,18 @@ func fetchWorkersCmd(buildPoolURL string) tea.Cmd {
 }
 
 // testWorkerCmd sends a test job to verify worker connectivity
-func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
+func testWorkerCmd(buildPoolURL, projectRoot string, gitDaemonPort int) tea.Cmd {
 	return func() tea.Msg {
 		client := &http.Client{Timeout: 150 * time.Second} // Must exceed job timeout (120s)
 
+		// Use configured port, default to 9418 if not set
+		port := gitDaemonPort
+		if port == 0 {
+			port = 9418
+		}
+
 		// Extract hostname from buildPoolURL (e.g., "http://host:8081" -> "host")
-		// and construct git daemon URL (default port 9418)
+		// and construct git daemon URL with configured port
 		gitURL := ""
 		if strings.HasPrefix(buildPoolURL, "http://") || strings.HasPrefix(buildPoolURL, "https://") {
 			// Parse the URL to get the hostname
@@ -1728,7 +1734,7 @@ func testWorkerCmd(buildPoolURL, projectRoot string) tea.Cmd {
 				hostPart = getExternalHost()
 			}
 
-			gitURL = fmt.Sprintf("git://%s:9418/", hostPart)
+			gitURL = fmt.Sprintf("git://%s:%d/", hostPart, port)
 		}
 
 		// Get current commit hash from local repo

@@ -546,6 +546,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		WorktreeDir:     cfg.General.WorktreeDir,
 		PlansDir:        cfg.General.ProjectRoot + "/docs/plans",
 		BuildPoolURL:    buildPoolURL,
+		GitDaemonPort:   cfg.BuildPool.GitDaemonPort,
 		AgentManager:    agentMgr,
 		RecoveredAgents: recoveredViews,
 		PlanWatcher:     planWatcher,

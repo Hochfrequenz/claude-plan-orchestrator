@@ -128,6 +128,7 @@ type Model struct {
 	// Build pool
 	buildPoolURL    string
 	buildPoolStatus string // "disabled", "unreachable", "connected"
+	gitDaemonPort   int    // Git daemon port for remote workers
 
 	// Refresh
 	lastRefresh time.Time
@@ -201,6 +202,7 @@ type ModelConfig struct {
 	WorktreeDir     string
 	PlansDir        string // Directory containing plans (for sync)
 	BuildPoolURL    string // URL for build pool status (e.g., "http://localhost:8081")
+	GitDaemonPort   int    // Git daemon port for remote workers (e.g., 9418)
 	AgentManager    *executor.AgentManager
 	WorktreeManager *executor.WorktreeManager
 	RecoveredAgents []*AgentView // Agents recovered from previous session
@@ -299,6 +301,7 @@ func NewModel(cfg ModelConfig) Model {
 		worktreeDir:     cfg.WorktreeDir,
 		buildPoolURL:    cfg.BuildPoolURL,
 		buildPoolStatus: buildPoolStatus,
+		gitDaemonPort:   cfg.GitDaemonPort,
 		agentManager:    agentMgr,
 		worktreeManager: worktreeMgr,
 		planWatcher:     cfg.PlanWatcher,
