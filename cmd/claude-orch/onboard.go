@@ -139,11 +139,21 @@ func runOnboard(cmd *cobra.Command, args []string) error {
 	fmt.Println("\033[1m\033[36mCreating Configuration\033[0m")
 	fmt.Println()
 
-	configDir := filepath.Join(home, ".config", "claude-orchestrator")
-	configFile := filepath.Join(configDir, "config.toml")
+	// Default to local config in project root
+	localConfigFile := filepath.Join(projectRoot, ".claude-orchestrator.toml")
+	globalConfigDir := filepath.Join(home, ".config", "claude-orchestrator")
+	globalConfigFile := filepath.Join(globalConfigDir, "config.toml")
 
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("creating config dir: %w", err)
+	useLocalConfig := confirm("Create local config in project directory? (recommended)", true)
+
+	var configFile string
+	if useLocalConfig {
+		configFile = localConfigFile
+	} else {
+		configFile = globalConfigFile
+		if err := os.MkdirAll(globalConfigDir, 0755); err != nil {
+			return fmt.Errorf("creating config dir: %w", err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return fmt.Errorf("creating data dir: %w", err)
@@ -330,6 +340,11 @@ claude-orch start
 	fmt.Println()
 	fmt.Println("Next steps:")
 	fmt.Println()
+	if useLocalConfig {
+		fmt.Println("  0. Add config to .gitignore (contains local paths):")
+		fmt.Println("     echo '.claude-orchestrator.toml' >> .gitignore")
+		fmt.Println()
+	}
 	fmt.Println("  1. Create your implementation plans in:")
 	fmt.Printf("     %s/{module}/epic-XX-name.md\n", plansDir)
 	fmt.Println()
