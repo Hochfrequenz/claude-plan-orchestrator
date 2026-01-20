@@ -21,6 +21,7 @@ type TestAgentConfig struct {
 	ProjectRoot  string // Path to the project root
 	MCPBinary    string // Path to the build-mcp binary (optional, will search PATH)
 	Verbose      bool   // Show verbose output
+	ExecutorType string // "claude-code" (default) or "opencode"
 }
 
 // TestAgentResult contains the results of the test
@@ -60,30 +61,53 @@ After running all tests, provide a summary:
 
 Be concise. Just run the tests and report results.`
 
-// RunTestAgent runs a Claude agent to test the build pool MCP tools
+// RunTestAgent runs an AI agent to test the build pool MCP tools
 func RunTestAgent(ctx context.Context, config TestAgentConfig, onOutput TestAgentOutputCallback) (*TestAgentResult, error) {
-	// Find or create MCP config
-	mcpConfig, cleanup, err := createTestMCPConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("creating MCP config: %w", err)
+	var cmd *exec.Cmd
+	var cleanup func()
+
+	if config.ExecutorType == "opencode" {
+		// Build OpenCode command
+		mcpConfigPath, cleanupFn, err := createTestMCPConfigOpenCode(config)
+		if err != nil {
+			return nil, fmt.Errorf("creating OpenCode MCP config: %w", err)
+		}
+		cleanup = cleanupFn
+
+		args := []string{
+			"run",
+			"--format", "json",
+		}
+		args = append(args, TestPrompt)
+
+		cmd = exec.CommandContext(ctx, "opencode", args...)
+		cmd.Dir = config.ProjectRoot
+		cmd.Env = append(os.Environ(), "OPENCODE_CONFIG="+mcpConfigPath)
+	} else {
+		// Build Claude Code command (default)
+		mcpConfig, cleanupFn, err := createTestMCPConfig(config)
+		if err != nil {
+			return nil, fmt.Errorf("creating MCP config: %w", err)
+		}
+		cleanup = cleanupFn
+
+		args := []string{
+			"--print",
+			"--dangerously-skip-permissions",
+			"--mcp-config", mcpConfig,
+		}
+
+		if config.Verbose {
+			args = append(args, "--verbose", "--output-format", "stream-json")
+		}
+
+		args = append(args, "-p", TestPrompt)
+
+		cmd = exec.CommandContext(ctx, "claude", args...)
+		cmd.Dir = config.ProjectRoot
 	}
+
 	defer cleanup()
-
-	// Build claude command
-	args := []string{
-		"--print",
-		"--dangerously-skip-permissions",
-		"--mcp-config", mcpConfig,
-	}
-
-	if config.Verbose {
-		args = append(args, "--verbose", "--output-format", "stream-json")
-	}
-
-	args = append(args, "-p", TestPrompt)
-
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	cmd.Dir = config.ProjectRoot
 
 	// Capture output
 	stdout, err := cmd.StdoutPipe()
@@ -195,32 +219,11 @@ func extractTextFromStreamJSON(line string) string {
 	return ""
 }
 
-// createTestMCPConfig creates a temporary MCP config for the test agent
+// createTestMCPConfig creates a temporary MCP config for the test agent (Claude Code format)
 func createTestMCPConfig(config TestAgentConfig) (string, func(), error) {
-	// Find build-mcp binary
-	mcpBinary := config.MCPBinary
-	if mcpBinary == "" {
-		// Look in common locations
-		candidates := []string{
-			filepath.Join(config.ProjectRoot, "build-mcp"),
-			filepath.Join(filepath.Dir(os.Args[0]), "build-mcp"),
-		}
-
-		// Also check PATH
-		if path, err := exec.LookPath("build-mcp"); err == nil {
-			candidates = append([]string{path}, candidates...)
-		}
-
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				mcpBinary = c
-				break
-			}
-		}
-
-		if mcpBinary == "" {
-			return "", nil, fmt.Errorf("build-mcp binary not found")
-		}
+	mcpBinary, err := findBuildMCPBinary(config)
+	if err != nil {
+		return "", nil, err
 	}
 
 	// Create temp config file
@@ -229,7 +232,7 @@ func createTestMCPConfig(config TestAgentConfig) (string, func(), error) {
 		return "", nil, err
 	}
 
-	// Build config
+	// Build config (Claude Code format)
 	mcpConfig := map[string]interface{}{
 		"mcpServers": map[string]interface{}{
 			"build-pool": map[string]interface{}{
@@ -259,10 +262,84 @@ func createTestMCPConfig(config TestAgentConfig) (string, func(), error) {
 	return tmpFile.Name(), cleanup, nil
 }
 
+// createTestMCPConfigOpenCode creates a temporary MCP config for the test agent (OpenCode format)
+func createTestMCPConfigOpenCode(config TestAgentConfig) (string, func(), error) {
+	mcpBinary, err := findBuildMCPBinary(config)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Create temp config file
+	tmpFile, err := os.CreateTemp("", "opencode-test-config-*.json")
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Build config (OpenCode format)
+	mcpConfig := map[string]interface{}{
+		"$schema": "https://opencode.ai/config.json",
+		"mcp": map[string]interface{}{
+			"build-pool": map[string]interface{}{
+				"type":    "local",
+				"command": []string{mcpBinary},
+				"enabled": true,
+				"environment": map[string]string{
+					"BUILD_POOL_URL": config.BuildPoolURL,
+					"PROJECT_ROOT":   config.ProjectRoot,
+				},
+			},
+		},
+	}
+
+	encoder := json.NewEncoder(tmpFile)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(mcpConfig); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", nil, err
+	}
+	tmpFile.Close()
+
+	cleanup := func() {
+		os.Remove(tmpFile.Name())
+	}
+
+	return tmpFile.Name(), cleanup, nil
+}
+
+// findBuildMCPBinary finds the build-mcp binary
+func findBuildMCPBinary(config TestAgentConfig) (string, error) {
+	mcpBinary := config.MCPBinary
+	if mcpBinary == "" {
+		// Look in common locations
+		candidates := []string{
+			filepath.Join(config.ProjectRoot, "build-mcp"),
+			filepath.Join(filepath.Dir(os.Args[0]), "build-mcp"),
+		}
+
+		// Also check PATH
+		if path, err := exec.LookPath("build-mcp"); err == nil {
+			candidates = append([]string{path}, candidates...)
+		}
+
+		for _, c := range candidates {
+			if _, err := os.Stat(c); err == nil {
+				mcpBinary = c
+				break
+			}
+		}
+
+		if mcpBinary == "" {
+			return "", fmt.Errorf("build-mcp binary not found")
+		}
+	}
+	return mcpBinary, nil
+}
+
 // RunTestAgentWithEmbeddedCoordinator starts a temporary coordinator with embedded worker,
 // runs the agent test, then shuts down the coordinator. Use this when no external coordinator
 // is available.
-func RunTestAgentWithEmbeddedCoordinator(ctx context.Context, projectRoot string, verbose bool, onOutput TestAgentOutputCallback) (*TestAgentResult, error) {
+func RunTestAgentWithEmbeddedCoordinator(ctx context.Context, projectRoot string, verbose bool, executorType string, onOutput TestAgentOutputCallback) (*TestAgentResult, error) {
 	// Create worktree directory for embedded worker
 	worktreeDir, err := os.MkdirTemp("", "agent-test-worktrees-")
 	if err != nil {
@@ -302,6 +379,7 @@ func RunTestAgentWithEmbeddedCoordinator(ctx context.Context, projectRoot string
 		BuildPoolURL: buildPoolURL,
 		ProjectRoot:  projectRoot,
 		Verbose:      verbose,
+		ExecutorType: executorType,
 	}
 
 	return RunTestAgent(ctx, config, onOutput)

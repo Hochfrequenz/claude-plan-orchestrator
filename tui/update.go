@@ -695,14 +695,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 				m.activeCount++
 
+				// Get executor type from agent manager
+				executorType := ""
+				if m.agentManager != nil {
+					executorType = string(m.agentManager.GetExecutorType())
+				}
+
 				if m.buildPoolURL != "" && m.buildPoolStatus == "connected" {
 					// Use external coordinator
 					m.statusMsg = "Starting agent test via coordinator..."
-					return m, runAgentTestCmd(taskID, m.buildPoolURL, m.projectRoot)
+					return m, runAgentTestCmd(taskID, m.buildPoolURL, m.projectRoot, executorType)
 				} else {
 					// Start temporary coordinator with embedded worker
 					m.statusMsg = "Starting agent test with embedded worker..."
-					return m, runAgentTestWithEmbeddedCmd(taskID, m.projectRoot)
+					return m, runAgentTestWithEmbeddedCmd(taskID, m.projectRoot, executorType)
 				}
 			}
 		case "M":
@@ -1952,7 +1958,7 @@ func applyResolutionsCmd(syncer *isync.Syncer, store *taskstore.Store, resolutio
 }
 
 // runAgentTestCmd spawns a Claude agent to test the build pool MCP tools via external coordinator
-func runAgentTestCmd(taskID, buildPoolURL, projectRoot string) tea.Cmd {
+func runAgentTestCmd(taskID, buildPoolURL, projectRoot, executorType string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -1974,6 +1980,7 @@ func runAgentTestCmd(taskID, buildPoolURL, projectRoot string) tea.Cmd {
 			BuildPoolURL: buildPoolURL,
 			ProjectRoot:  projectRoot,
 			Verbose:      true,
+			ExecutorType: executorType,
 		}
 
 		result, err := buildpool.RunTestAgent(ctx, config, onOutput)
@@ -2001,7 +2008,7 @@ func runAgentTestCmd(taskID, buildPoolURL, projectRoot string) tea.Cmd {
 }
 
 // runAgentTestWithEmbeddedCmd spawns a Claude agent with a temporary embedded coordinator
-func runAgentTestWithEmbeddedCmd(taskID, projectRoot string) tea.Cmd {
+func runAgentTestWithEmbeddedCmd(taskID, projectRoot, executorType string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -2019,7 +2026,7 @@ func runAgentTestWithEmbeddedCmd(taskID, projectRoot string) tea.Cmd {
 			testAgentMutex.Unlock()
 		}
 
-		result, err := buildpool.RunTestAgentWithEmbeddedCoordinator(ctx, projectRoot, true, onOutput)
+		result, err := buildpool.RunTestAgentWithEmbeddedCoordinator(ctx, projectRoot, true, executorType, onOutput)
 
 		// Clear the task ID when done
 		testAgentMutex.Lock()
