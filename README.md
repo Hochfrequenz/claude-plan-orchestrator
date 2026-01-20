@@ -517,6 +517,7 @@ You can also specify a custom path with `--config /path/to/config.toml`.
 Agent config file (`/etc/build-agent/config.toml`):
 
 ```toml
+# Single orchestrator (legacy format, still supported)
 [server]
 url = "ws://coordinator-host:8081/ws"
 
@@ -538,6 +539,40 @@ prewarm_packages = [
   "nixpkgs#rustfmt"
 ]
 ```
+
+**Multi-Orchestrator Configuration:**
+
+A single build agent can connect to multiple orchestrators simultaneously, accepting work from any of them while sharing a common job pool:
+
+```toml
+# Multiple orchestrators - agent connects to all simultaneously
+[[servers]]
+url = "ws://orchestrator1:8081/ws"
+name = "project-a"  # Optional, for logging
+
+[[servers]]
+url = "ws://orchestrator2:8081/ws"
+name = "project-b"
+
+[[servers]]
+url = "ws://orchestrator3:8081/ws"
+# name is optional, defaults to URL in logs
+
+[worker]
+id = "shared-worker"
+max_jobs = 8         # Total capacity shared across all orchestrators
+
+[storage]
+git_cache_dir = "/var/cache/build-agent/repos"
+worktree_dir = "/tmp/build-agent/jobs"
+```
+
+With multi-orchestrator mode:
+- The agent maintains separate WebSocket connections to each orchestrator
+- Job capacity is shared: if `max_jobs = 8` and orchestrator1 assigns 3 jobs, orchestrators 2 and 3 see 5 available slots
+- Each orchestrator receives `ReadyMessage` updates when slot availability changes
+- Connections are independent: if one orchestrator goes down, the agent continues serving others
+- Automatic reconnection applies per-connection with exponential backoff
 
 #### Option 3: NixOS Module
 
