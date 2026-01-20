@@ -1,8 +1,6 @@
 package scheduler
 
 import (
-	"fmt"
-	"os"
 	"sort"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
@@ -71,7 +69,6 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 	}
 
 	var ready []*domain.Task
-	var debugSkipped []string
 
 	for _, task := range s.tasks {
 		// Skip tasks not in active tier (if priorities are configured)
@@ -82,25 +79,10 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 			}
 		}
 
-		isReady := task.IsReady(s.completed)
-		dependsOnInProgress := s.dependsOnAny(task, inProgress)
-
-		if isReady && !dependsOnInProgress {
+		if task.IsReady(s.completed) && !s.dependsOnAny(task, inProgress) {
 			ready = append(ready, task)
-		} else if task.ID.String() == "cli-tui-implementation/TUI06" {
-			// Debug: why is TUI06 not ready?
-			debugSkipped = append(debugSkipped, fmt.Sprintf("TUI06: isReady=%v, dependsOnInProgress=%v, status=%s", isReady, dependsOnInProgress, task.Status))
 		}
 	}
-
-	// Log debug info for TUI06 if it was skipped
-	if len(debugSkipped) > 0 {
-		fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: %v\n", debugSkipped)
-	}
-
-	// Debug: check if TUI05 is in completed set
-	tui05Key := "cli-tui-implementation/TUI05"
-	fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: TUI05 in s.completed = %v\n", s.completed[tui05Key])
 
 	// Sort by priority
 	sort.Slice(ready, func(i, j int) bool {
@@ -137,17 +119,11 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 
 	for _, task := range ready {
 		if len(selected) >= limit {
-			if task.ID.String() == "cli-tui-implementation/TUI06" {
-				fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: TUI06 skipped due to limit, selected=%d, limit=%d\n", len(selected), limit)
-			}
 			break
 		}
 
 		// Check if this task conflicts with already selected tasks
 		if s.conflictsWithSelected(task, selectedIDs, selectedSequences) {
-			if task.ID.String() == "cli-tui-implementation/TUI06" {
-				fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: TUI06 filtered by conflictsWithSelected, selectedIDs=%v, selectedSequences=%v\n", selectedIDs, selectedSequences)
-			}
 			continue
 		}
 
@@ -158,18 +134,6 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 		if task.ID.EpicNum > selectedSequences[seqKey] {
 			selectedSequences[seqKey] = task.ID.EpicNum
 		}
-		if task.ID.String() == "cli-tui-implementation/TUI06" {
-			fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: TUI06 SELECTED successfully\n")
-		}
-	}
-
-	// Debug: print all selected task IDs
-	if len(selected) > 0 {
-		var ids []string
-		for _, t := range selected {
-			ids = append(ids, t.ID.String())
-		}
-		fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: returning %d tasks: %v\n", len(selected), ids)
 	}
 
 	return selected
@@ -225,15 +189,19 @@ func (s *Scheduler) conflictsWithSelected(task *domain.Task, selectedIDs map[str
 				}
 			}
 		} else if task.ID.EpicNum < highestEpic {
-			// A later epic was already selected, check if it depends on this one
+			// A later epic was already selected, check if it ACTUALLY depends on this one
+			// Only conflict if the selected task has this task as a direct dependency
 			for epic := task.ID.EpicNum + 1; epic <= highestEpic; epic++ {
 				implicitDep := domain.TaskID{Module: task.ID.Module, Prefix: task.ID.Prefix, EpicNum: epic}
 				if selectedIDs[implicitDep.String()] {
-					// Check if that selected task might depend on this one
 					selTask := s.taskMap[implicitDep.String()]
-					if selTask != nil && !s.completed[task.ID.String()] {
-						// If they're in same sequence and sequential, assume dependency
-						return true
+					if selTask != nil {
+						// Check if selTask explicitly depends on this task
+						for _, dep := range selTask.DependsOn {
+							if dep.String() == task.ID.String() {
+								return true
+							}
+						}
 					}
 				}
 			}
