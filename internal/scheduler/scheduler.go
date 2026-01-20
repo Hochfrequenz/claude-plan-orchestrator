@@ -92,20 +92,23 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 			return pi < pj
 		}
 
-		// 2. Dependency depth (unblocks more work)
-		di, dj := s.dependencyDepth(ready[i].ID.String()), s.dependencyDepth(ready[j].ID.String())
-		if di != dj {
-			return di > dj
-		}
-
-		// 3. Different modules first (spread work across modules)
+		// 2. Different modules first (spread work across modules)
 		if ready[i].ID.Module != ready[j].ID.Module {
 			return ready[i].ID.Module < ready[j].ID.Module
 		}
 
-		// 4. Epic number (earlier epics first within same module)
-		if ready[i].ID.EpicNum != ready[j].ID.EpicNum {
-			return ready[i].ID.EpicNum < ready[j].ID.EpicNum
+		// 3. Within same module+prefix (same sequence): natural order by epic number
+		// This ensures TUI06 comes before TUI09, CLI02 before CLI05, etc.
+		if ready[i].ID.Prefix == ready[j].ID.Prefix {
+			if ready[i].ID.EpicNum != ready[j].ID.EpicNum {
+				return ready[i].ID.EpicNum < ready[j].ID.EpicNum
+			}
+		}
+
+		// 4. Dependency depth (unblocks more work) - for different sequences
+		di, dj := s.dependencyDepth(ready[i].ID.String()), s.dependencyDepth(ready[j].ID.String())
+		if di != dj {
+			return di > dj
 		}
 
 		// 5. Prefix (alphabetical, for consistent ordering of CLI vs TUI etc.)
