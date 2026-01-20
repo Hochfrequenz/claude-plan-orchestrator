@@ -484,10 +484,11 @@ func (a *Agent) buildClaudeCodeCommand(ctx context.Context) *exec.Cmd {
 
 // buildOpenCodeCommand builds the command for OpenCode
 func (a *Agent) buildOpenCodeCommand(ctx context.Context) *exec.Cmd {
+	// Note: OpenCode manages its own session IDs (prefixed with "ses")
+	// We don't pass -s here; use -c for resume instead
 	args := []string{
-		"run",            // Non-interactive mode
+		"run",              // Non-interactive mode
 		"--format", "json", // JSON output for parsing
-		"-s", a.SessionID,  // Session ID for resume capability
 	}
 
 	// Add prompt as final argument
