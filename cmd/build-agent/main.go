@@ -42,12 +42,21 @@ func main() {
 	}
 }
 
+// ServerConfig defines a single orchestrator server connection
+type ServerConfig struct {
+	URL  string `toml:"url"`
+	Name string `toml:"name"` // Optional, for logging
+}
+
 // Config defines the build-agent configuration file format
 type Config struct {
+	// Legacy single server config (for backward compatibility)
 	Server struct {
 		URL string `toml:"url"`
 	} `toml:"server"`
-	Worker struct {
+	// New multi-server config
+	Servers []ServerConfig `toml:"servers"`
+	Worker  struct {
 		ID      string `toml:"id"`
 		MaxJobs int    `toml:"max_jobs"`
 	} `toml:"worker"`
@@ -58,6 +67,19 @@ type Config struct {
 	Nix struct {
 		PrewarmPackages []string `toml:"prewarm_packages"`
 	} `toml:"nix"`
+}
+
+// GetServers returns the configured servers, handling backward compatibility
+func (c *Config) GetServers() []ServerConfig {
+	// If new multi-server config is used, return it
+	if len(c.Servers) > 0 {
+		return c.Servers
+	}
+	// Fall back to legacy single server config
+	if c.Server.URL != "" {
+		return []ServerConfig{{URL: c.Server.URL, Name: "default"}}
+	}
+	return nil
 }
 
 // Default config file locations (checked in order)
@@ -99,8 +121,9 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// CLI flags override config (only if explicitly set)
+	// --server flag adds/overrides the server list for single-server mode
 	if serverURL != "" {
-		cfg.Server.URL = serverURL
+		cfg.Servers = []ServerConfig{{URL: serverURL, Name: "cli"}}
 	}
 	if workerID != "" {
 		cfg.Worker.ID = workerID
@@ -124,6 +147,12 @@ func run(cmd *cobra.Command, args []string) error {
 		cfg.Storage.WorktreeDir = "/tmp/build-agent/jobs"
 	}
 
+	// Get configured servers (handles backward compatibility)
+	servers := cfg.GetServers()
+	if len(servers) == 0 {
+		return fmt.Errorf("no server URLs configured; use --server or configure [[servers]] in config file")
+	}
+
 	// Prewarm nix store with common packages
 	if len(cfg.Nix.PrewarmPackages) > 0 {
 		if err := prewarmNix(cfg.Nix.PrewarmPackages); err != nil {
@@ -132,9 +161,18 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Create worker
-	worker, err := buildworker.NewWorker(buildworker.WorkerConfig{
-		ServerURL:   cfg.Server.URL,
+	// Convert to buildworker.ServerConfig
+	bwServers := make([]buildworker.ServerConfig, len(servers))
+	for i, srv := range servers {
+		bwServers[i] = buildworker.ServerConfig{
+			URL:  srv.URL,
+			Name: srv.Name,
+		}
+	}
+
+	// Create multi-client (works with single or multiple servers)
+	client, err := buildworker.NewMultiClient(buildworker.MultiClientConfig{
+		Servers:     bwServers,
 		WorkerID:    cfg.Worker.ID,
 		MaxJobs:     cfg.Worker.MaxJobs,
 		GitCacheDir: cfg.Storage.GitCacheDir,
@@ -143,7 +181,7 @@ func run(cmd *cobra.Command, args []string) error {
 		Debug:       debug,
 	})
 	if err != nil {
-		return fmt.Errorf("creating worker: %w", err)
+		return fmt.Errorf("creating client: %w", err)
 	}
 
 	// Handle shutdown
@@ -153,14 +191,27 @@ func run(cmd *cobra.Command, args []string) error {
 	go func() {
 		<-sigCh
 		fmt.Println("\nShutting down...")
-		worker.Stop()
+		client.Stop()
 	}()
 
-	fmt.Printf("Starting worker %s connecting to %s (max_jobs=%d)...\n",
-		cfg.Worker.ID, cfg.Server.URL, cfg.Worker.MaxJobs)
+	// Print startup info
+	if len(servers) == 1 {
+		fmt.Printf("Starting worker %s connecting to %s (max_jobs=%d)...\n",
+			cfg.Worker.ID, servers[0].URL, cfg.Worker.MaxJobs)
+	} else {
+		fmt.Printf("Starting worker %s connecting to %d orchestrators (max_jobs=%d)...\n",
+			cfg.Worker.ID, len(servers), cfg.Worker.MaxJobs)
+		for _, srv := range servers {
+			name := srv.Name
+			if name == "" {
+				name = srv.URL
+			}
+			fmt.Printf("  - %s\n", name)
+		}
+	}
 
 	// Run with automatic reconnection (blocks until stopped)
-	return worker.RunWithReconnect()
+	return client.RunWithReconnect()
 }
 
 func checkPrerequisites() error {

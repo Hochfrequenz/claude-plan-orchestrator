@@ -56,11 +56,12 @@ func (c *WorkerConfig) Validate() error {
 
 // Worker is a build agent that connects to a coordinator
 type Worker struct {
-	config   WorkerConfig
-	pool     *Pool
-	executor *Executor
-	conn     *websocket.Conn
-	mu       sync.Mutex
+	config          WorkerConfig
+	pool            *Pool
+	executor        *Executor
+	conn            *websocket.Conn
+	mu              sync.Mutex
+	orchestratorName string // Name/identifier for logging when using multiple orchestrators
 
 	// For graceful shutdown
 	ctx    context.Context
@@ -88,9 +89,30 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 			UseNixShell: config.UseNixShell,
 			Debug:       config.Debug,
 		}),
-		ctx:    ctx,
-		cancel: cancel,
-		jobs:   make(map[string]context.CancelFunc),
+		orchestratorName: config.ServerURL,
+		ctx:              ctx,
+		cancel:           cancel,
+		jobs:             make(map[string]context.CancelFunc),
+	}, nil
+}
+
+// NewWorkerWithSharedResources creates a worker that uses shared pool and executor
+// This is used by MultiClient to coordinate multiple orchestrator connections
+func NewWorkerWithSharedResources(config WorkerConfig, pool *Pool, executor *Executor, orchestratorName string) (*Worker, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &Worker{
+		config:           config,
+		pool:             pool,
+		executor:         executor,
+		orchestratorName: orchestratorName,
+		ctx:              ctx,
+		cancel:           cancel,
+		jobs:             make(map[string]context.CancelFunc),
 	}, nil
 }
 
@@ -271,6 +293,20 @@ func (w *Worker) sendReady() error {
 	})
 }
 
+// sendReadyIfConnected sends a ready message if the connection is active
+// Used by MultiClient to broadcast slot changes to all orchestrators
+func (w *Worker) sendReadyIfConnected() error {
+	w.mu.Lock()
+	connected := w.conn != nil
+	w.mu.Unlock()
+
+	if !connected {
+		return nil // Not an error, just not connected
+	}
+
+	return w.sendReady()
+}
+
 func (w *Worker) send(msgType string, payload interface{}) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -301,10 +337,18 @@ func (w *Worker) Stop() {
 
 // RunWithReconnect runs the worker with automatic reconnection
 func (w *Worker) RunWithReconnect() error {
+	return w.RunWithReconnectContext(w.ctx)
+}
+
+// RunWithReconnectContext runs the worker with automatic reconnection using the provided context
+// This allows external control of the reconnection loop (used by MultiClient)
+func (w *Worker) RunWithReconnectContext(ctx context.Context) error {
 	attempt := 0
 
 	for {
 		select {
+		case <-ctx.Done():
+			return nil
 		case <-w.ctx.Done():
 			return nil
 		default:
@@ -314,10 +358,12 @@ func (w *Worker) RunWithReconnect() error {
 		err := w.Connect()
 		if err != nil {
 			delay := calculateBackoff(attempt)
-			log.Printf("connection failed: %v, retrying in %v", err, delay)
+			log.Printf("[%s] connection failed: %v, retrying in %v", w.orchestratorName, err, delay)
 			attempt++
 
 			select {
+			case <-ctx.Done():
+				return nil
 			case <-w.ctx.Done():
 				return nil
 			case <-time.After(delay):
@@ -327,7 +373,7 @@ func (w *Worker) RunWithReconnect() error {
 
 		// Connected - reset backoff
 		attempt = 0
-		log.Printf("connected to coordinator")
+		log.Printf("[%s] connected to coordinator", w.orchestratorName)
 
 		// Run until disconnected
 		err = w.Run()
@@ -341,11 +387,13 @@ func (w *Worker) RunWithReconnect() error {
 		w.mu.Unlock()
 
 		if err != nil {
-			log.Printf("disconnected: %v", err)
+			log.Printf("[%s] disconnected: %v", w.orchestratorName, err)
 		}
 
 		// Don't reconnect if we're shutting down
 		select {
+		case <-ctx.Done():
+			return nil
 		case <-w.ctx.Done():
 			return nil
 		default:
