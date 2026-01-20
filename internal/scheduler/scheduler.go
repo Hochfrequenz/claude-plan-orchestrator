@@ -98,6 +98,10 @@ func (s *Scheduler) GetReadyTasksExcluding(limit int, inProgress map[string]bool
 		fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: %v\n", debugSkipped)
 	}
 
+	// Debug: check if TUI05 is in completed set
+	tui05Key := "cli-tui-implementation/TUI05"
+	fmt.Fprintf(os.Stderr, "SCHEDULER DEBUG: TUI05 in s.completed = %v\n", s.completed[tui05Key])
+
 	// Sort by priority
 	sort.Slice(ready, func(i, j int) bool {
 		// 1. Priority (high > normal > low)
