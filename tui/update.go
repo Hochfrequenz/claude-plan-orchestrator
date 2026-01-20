@@ -1577,13 +1577,14 @@ func startBatchCmd(
 
 			// Create the agent with status callback for persistence
 			agent := &executor.Agent{
-				TaskID:       task.ID,
-				WorktreePath: wtPath,
-				EpicFilePath: task.FilePath, // For sync callback to update epic status
-				Status:       executor.AgentQueued,
-				Prompt:       prompt,
-				BuildPoolURL: agentMgr.GetBuildPoolURL(),
-				ExecutorType: agentMgr.GetExecutorType(),
+				TaskID:        task.ID,
+				WorktreePath:  wtPath,
+				EpicFilePath:  task.FilePath, // For sync callback to update epic status
+				Status:        executor.AgentQueued,
+				Prompt:        prompt,
+				BuildPoolURL:  agentMgr.GetBuildPoolURL(),
+				ExecutorType:  agentMgr.GetExecutorType(),
+				OpenCodeModel: agentMgr.GetOpenCodeModel(),
 			}
 
 			// Set up status change callback if manager has persistence
@@ -2230,6 +2231,7 @@ func (m *Model) startMaintenanceTask() tea.Cmd {
 		if agentMgr != nil {
 			agent.BuildPoolURL = agentMgr.GetBuildPoolURL()
 			agent.ExecutorType = agentMgr.GetExecutorType()
+			agent.OpenCodeModel = agentMgr.GetOpenCodeModel()
 			agent.OnStatusChange = agentMgr.CreateStatusCallback()
 
 			if agentMgr.CanStart() {

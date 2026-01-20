@@ -47,21 +47,22 @@ type StatusChangeCallback func(agent *Agent, newStatus AgentStatus, errMsg strin
 
 // Agent represents a Claude Code agent working on a task
 type Agent struct {
-	ID           string // Unique identifier for this agent run
-	TaskID       domain.TaskID
-	WorktreePath string
-	LogPath      string // Path to the output log file
-	EpicFilePath string // Path to the epic markdown file in the main repo (for sync)
-	PID          int    // Process ID of the running claude process
-	Status       AgentStatus
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
-	Prompt       string
-	Output       []string
-	Error        error
-	SessionID    string       // Claude Code session ID for resume capability
-	BuildPoolURL string       // URL for build pool coordinator (if configured)
-	ExecutorType ExecutorType // Which AI coding agent to use (claude-code or opencode)
+	ID            string // Unique identifier for this agent run
+	TaskID        domain.TaskID
+	WorktreePath  string
+	LogPath       string // Path to the output log file
+	EpicFilePath  string // Path to the epic markdown file in the main repo (for sync)
+	PID           int    // Process ID of the running claude process
+	Status        AgentStatus
+	StartedAt     *time.Time
+	FinishedAt    *time.Time
+	Prompt        string
+	Output        []string
+	Error         error
+	SessionID     string       // Claude Code session ID for resume capability
+	BuildPoolURL  string       // URL for build pool coordinator (if configured)
+	ExecutorType  ExecutorType // Which AI coding agent to use (claude-code or opencode)
+	OpenCodeModel string       // Model to use for OpenCode (e.g., "zai-coding-plan/glm-4.7")
 
 	// Token usage from Claude session
 	TokensInput  int
@@ -126,6 +127,7 @@ type AgentManager struct {
 	syncer        *isync.Syncer
 	buildPoolURL  string
 	executorType  ExecutorType // Default executor for new agents
+	openCodeModel string       // Model to use for OpenCode (e.g., "zai-coding-plan/glm-4.7")
 	mu            sync.RWMutex
 
 	// Database write queue for serializing DB operations
@@ -243,6 +245,20 @@ func (m *AgentManager) GetExecutorType() ExecutorType {
 		return ExecutorClaudeCode
 	}
 	return m.executorType
+}
+
+// SetOpenCodeModel sets the model to use for OpenCode
+func (m *AgentManager) SetOpenCodeModel(model string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.openCodeModel = model
+}
+
+// GetOpenCodeModel returns the model to use for OpenCode
+func (m *AgentManager) GetOpenCodeModel() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.openCodeModel
 }
 
 // SetMaxConcurrent updates the maximum number of concurrent agents
@@ -489,6 +505,11 @@ func (a *Agent) buildOpenCodeCommand(ctx context.Context) *exec.Cmd {
 	args := []string{
 		"run",              // Non-interactive mode
 		"--format", "json", // JSON output for parsing
+	}
+
+	// Add model if specified (e.g., "zai-coding-plan/glm-4.7")
+	if a.OpenCodeModel != "" {
+		args = append(args, "-m", a.OpenCodeModel)
 	}
 
 	// Add prompt as final argument
@@ -843,11 +864,18 @@ func (a *Agent) buildClaudeCodeResumeCommand(ctx context.Context) *exec.Cmd {
 
 // buildOpenCodeResumeCommand builds the resume command for OpenCode
 func (a *Agent) buildOpenCodeResumeCommand(ctx context.Context) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "opencode",
+	args := []string{
 		"run",              // Non-interactive mode
 		"--format", "json", // JSON output for parsing
 		"-c",               // Continue last session
-	)
+	}
+
+	// Add model if specified (e.g., "zai-coding-plan/glm-4.7")
+	if a.OpenCodeModel != "" {
+		args = append(args, "-m", a.OpenCodeModel)
+	}
+
+	cmd := exec.CommandContext(ctx, "opencode", args...)
 	cmd.Dir = a.WorktreePath
 
 	// Set up environment for MCP config

@@ -32,11 +32,12 @@ var (
 	listModule       string
 	listPriority     int
 	servePort        int
-	syncSkipIssues   bool
-	syncIssuesOnly   bool
-	cleanupDryRun    bool
-	cleanupAll       bool
-	tuiExecutor      string
+	syncSkipIssues    bool
+	syncIssuesOnly    bool
+	cleanupDryRun     bool
+	cleanupAll        bool
+	tuiExecutor       string
+	tuiOpenCodeModel  string
 )
 
 func init() {
@@ -95,6 +96,7 @@ func init() {
 		RunE:  runTUI,
 	}
 	tuiCmd.Flags().StringVar(&tuiExecutor, "executor", "", "executor type: claude-code (default) or opencode")
+	tuiCmd.Flags().StringVar(&tuiOpenCodeModel, "opencode-model", "", "model for OpenCode (e.g., zai-coding-plan/glm-4.7)")
 	rootCmd.AddCommand(tuiCmd)
 
 	// serve command
@@ -418,6 +420,13 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			executorType, config.ExecutorClaudeCode, config.ExecutorOpenCode)
 	}
 	agentMgr.SetExecutorType(executor.ExecutorType(executorType))
+
+	// Set OpenCode model (CLI flag takes precedence over config)
+	openCodeModel := cfg.General.OpenCodeModel
+	if tuiOpenCodeModel != "" {
+		openCodeModel = tuiOpenCodeModel
+	}
+	agentMgr.SetOpenCodeModel(openCodeModel)
 
 	// Create syncer for updating README and epic status on completion
 	plansDir := cfg.General.ProjectRoot + "/docs/plans"

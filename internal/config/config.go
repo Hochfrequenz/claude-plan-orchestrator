@@ -49,7 +49,8 @@ type GeneralConfig struct {
 	WorktreeDir       string `toml:"worktree_dir"`
 	MaxParallelAgents int    `toml:"max_parallel_agents"`
 	DatabasePath      string `toml:"database_path"`
-	Executor          string `toml:"executor"` // "claude-code" (default) or "opencode"
+	Executor          string `toml:"executor"`       // "claude-code" (default) or "opencode"
+	OpenCodeModel     string `toml:"opencode_model"` // Model for OpenCode (e.g., "zai-coding-plan/glm-4.7")
 }
 
 // ClaudeConfig holds Claude API settings
