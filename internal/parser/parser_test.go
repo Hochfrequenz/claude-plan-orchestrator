@@ -72,6 +72,12 @@ func TestMatchEpicFile(t *testing.T) {
 		{"epic-tui-05-dashboard.md", "TUI", 5, true},
 		{"epic-api-00-scaffolding.md", "API", 0, true},
 
+		// Dot notation pattern: epic-1.2-name.md -> E2 (phase.epic)
+		{"epic-1.1-workspace-setup.md", "", 1, true},
+		{"epic-1.2-ci-cd-pipeline.md", "", 2, true},
+		{"epic-2.3-something.md", "", 3, true},
+		{"epic-10.15-large-numbers.md", "", 15, true},
+
 		// Non-matching patterns
 		{"README.md", "", 0, false},
 		{"00-overview.md", "", 0, false},

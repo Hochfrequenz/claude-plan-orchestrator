@@ -19,9 +19,11 @@ var (
 	// - epic-01-name.md (standard) -> E01
 	// - 01-epic-name.md (number prefix) -> E01
 	// - epic-cli-02-name.md (epic with subsystem prefix) -> CLI02
-	epicFileStandard  = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)        // epic-01-name.md
-	epicFileNumPrefix = regexp.MustCompile(`^(\d+)-epic-.*\.md$`)        // 01-epic-name.md
-	epicFileSubsystem = regexp.MustCompile(`^epic-([a-z]+)-(\d+)-.*\.md$`) // epic-cli-02-name.md
+	// - epic-1.2-name.md (phase.epic dot notation) -> E2 (uses second number as epic)
+	epicFileStandard    = regexp.MustCompile(`^epic-(\d+)-.*\.md$`)          // epic-01-name.md
+	epicFileNumPrefix   = regexp.MustCompile(`^(\d+)-epic-.*\.md$`)          // 01-epic-name.md
+	epicFileSubsystem   = regexp.MustCompile(`^epic-([a-z]+)-(\d+)-.*\.md$`) // epic-cli-02-name.md
+	epicFileDotNotation = regexp.MustCompile(`^epic-(\d+)\.(\d+)-.*\.md$`)   // epic-1.2-name.md
 
 	titleRegex = regexp.MustCompile(`^#\s+(.+)$`)
 	// Match table rows like: | [E01](path) | Description | 🟢 | or | E01 | Title | 🟢 |
@@ -45,6 +47,11 @@ func matchEpicFile(filename string) (prefix string, epicNum int, ok bool) {
 	if matches := epicFileSubsystem.FindStringSubmatch(filename); matches != nil {
 		num, _ := strconv.Atoi(matches[2])
 		return strings.ToUpper(matches[1]), num, true
+	}
+	// Dot notation pattern: epic-1.2-name.md -> E2 (second number is epic within phase)
+	if matches := epicFileDotNotation.FindStringSubmatch(filename); matches != nil {
+		num, _ := strconv.Atoi(matches[2])
+		return "", num, true
 	}
 	return "", 0, false
 }
