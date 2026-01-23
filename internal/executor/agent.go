@@ -519,17 +519,16 @@ func (a *Agent) buildOpenCodeCommand(ctx context.Context) *exec.Cmd {
 	cmd.Dir = a.WorktreePath
 
 	// Log the command being executed (without the full prompt for brevity)
+	// Note: caller (Start) already holds the lock, so we don't acquire it here
 	cmdLog := fmt.Sprintf("[orchestrator] Executing: opencode %s", strings.Join(args[:len(args)-1], " "))
 	if a.OpenCodeModel == "" {
 		cmdLog += " (WARNING: no model specified, will use opencode default which requires billing)"
 	}
-	a.mu.Lock()
 	a.Output = append(a.Output, cmdLog)
 	if a.logFile != nil {
 		a.logFile.WriteString(cmdLog + "\n")
 		a.logFile.Sync()
 	}
-	a.mu.Unlock()
 
 	// Set up environment for MCP config
 	cmd.Env = os.Environ()
