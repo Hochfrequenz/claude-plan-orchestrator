@@ -428,6 +428,18 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	}
 	agentMgr.SetOpenCodeModel(openCodeModel)
 
+	// Log executor configuration
+	if executorType == config.ExecutorOpenCode {
+		if openCodeModel != "" {
+			fmt.Printf("Using executor: %s with model: %s\n", executorType, openCodeModel)
+		} else {
+			fmt.Printf("WARNING: Using executor: %s with NO model configured!\n", executorType)
+			fmt.Printf("  This will use opencode's default model which requires OpenCode billing.\n")
+			fmt.Printf("  Set opencode_model in config or use --opencode-model flag.\n")
+			fmt.Printf("  Example: --opencode-model zai-coding-plan/glm-4.7\n")
+		}
+	}
+
 	// Create syncer for updating README and epic status on completion
 	plansDir := cfg.General.ProjectRoot + "/docs/plans"
 	syncer := sync.New(plansDir)
