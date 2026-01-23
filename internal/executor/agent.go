@@ -502,9 +502,9 @@ func (a *Agent) buildClaudeCodeCommand(ctx context.Context) *exec.Cmd {
 func (a *Agent) buildOpenCodeCommand(ctx context.Context) *exec.Cmd {
 	// Note: OpenCode manages its own session IDs (prefixed with "ses")
 	// We don't pass -s here; use -c for resume instead
+	// Note: --format json causes OpenCode to hang, so we use default format
 	args := []string{
-		"run",              // Non-interactive mode
-		"--format", "json", // JSON output for parsing
+		"run", // Non-interactive mode
 	}
 
 	// Add model if specified (e.g., "zai-coding-plan/glm-4.7")
@@ -876,10 +876,10 @@ func (a *Agent) buildClaudeCodeResumeCommand(ctx context.Context) *exec.Cmd {
 
 // buildOpenCodeResumeCommand builds the resume command for OpenCode
 func (a *Agent) buildOpenCodeResumeCommand(ctx context.Context) *exec.Cmd {
+	// Note: --format json causes OpenCode to hang, so we use default format
 	args := []string{
-		"run",              // Non-interactive mode
-		"--format", "json", // JSON output for parsing
-		"-c",               // Continue last session
+		"run", // Non-interactive mode
+		"-c",  // Continue last session
 	}
 
 	// Add model if specified (e.g., "zai-coding-plan/glm-4.7")
