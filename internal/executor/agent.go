@@ -1108,15 +1108,18 @@ func (a *Agent) generateOpenCodeMCPConfig() string {
 		}
 	}
 
-	// Return empty if no MCPs configured
-	if len(mcpServers) == 0 {
-		return ""
-	}
-
-	// Build OpenCode config structure
+	// Build OpenCode config structure with permissions
+	// Allow external_directory to prevent permission prompts for worktree paths
 	config := map[string]interface{}{
 		"$schema": "https://opencode.ai/config.json",
-		"mcp":     mcpServers,
+		"permission": map[string]string{
+			"external_directory": "allow",
+		},
+	}
+
+	// Add MCP servers if any are configured
+	if len(mcpServers) > 0 {
+		config["mcp"] = mcpServers
 	}
 
 	configJSON, err := json.MarshalIndent(config, "", "  ")
