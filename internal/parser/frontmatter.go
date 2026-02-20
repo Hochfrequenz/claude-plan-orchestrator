@@ -2,6 +2,8 @@ package parser
 
 import (
 	"bytes"
+	"strconv"
+	"strings"
 
 	"github.com/hochfrequenz/claude-plan-orchestrator/internal/domain"
 	"gopkg.in/yaml.v3"
@@ -43,10 +45,24 @@ func ParseFrontmatter(content []byte) (*Frontmatter, []byte, error) {
 
 // ParseDependencies converts string dependency IDs to TaskIDs
 func ParseDependencies(deps []string) ([]domain.TaskID, error) {
+	return ParseDependenciesInModule(deps, "")
+}
+
+// ParseDependenciesInModule converts string dependency IDs to TaskIDs.
+// Bare numbers (e.g. "1", "03") are resolved as E{num} within the given module.
+func ParseDependenciesInModule(deps []string, module string) ([]domain.TaskID, error) {
 	result := make([]domain.TaskID, 0, len(deps))
 	for _, d := range deps {
 		tid, err := domain.ParseTaskID(d)
 		if err != nil {
+			// Try bare number: resolve as E{num} in the same module
+			if module != "" {
+				num, numErr := strconv.Atoi(strings.TrimSpace(d))
+				if numErr == nil {
+					result = append(result, domain.TaskID{Module: module, EpicNum: num})
+					continue
+				}
+			}
 			return nil, err
 		}
 		result = append(result, tid)

@@ -77,7 +77,7 @@ func ParseEpicFile(path string) (*domain.Task, error) {
 	description := extractDescription(body)
 	testSummary := ExtractTestSummary(content)
 
-	deps, err := ParseDependencies(fm.DependsOn)
+	deps, err := ParseDependenciesInModule(fm.DependsOn, taskID.Module)
 	if err != nil {
 		return nil, fmt.Errorf("parsing dependencies: %w", err)
 	}

@@ -336,9 +336,67 @@ Implement input validation for all user-facing forms.
 
 ### Dependencies
 
-- **Implicit**: Within a module, E{N} automatically depends on E{N-1}
-- **Explicit**: Defined in `depends_on` frontmatter field
-- **Cross-module**: Can reference tasks from other modules
+The scheduler resolves three types of dependencies to determine which tasks are ready to run:
+
+#### Implicit (within a module)
+
+Within the same module and prefix, each epic automatically depends on the highest-numbered existing epic below it. You don't need to declare these — they're inferred from the file structure.
+
+For example, if `billing/` contains `epic-00-setup.md`, `epic-01-payments.md`, and `epic-03-invoicing.md`:
+- `billing/E01` depends on `billing/E00`
+- `billing/E03` depends on `billing/E01` (E02 is skipped because it doesn't exist)
+
+Implicit dependencies are not added if an explicit dependency on that predecessor already exists.
+
+#### Explicit
+
+Declared in the YAML frontmatter using the `depends_on` field:
+
+```yaml
+---
+priority: high
+depends_on:
+  - technical/E04
+  - billing/E00
+---
+```
+
+Inline array syntax also works: `depends_on: [technical/E04, billing/E00]`
+
+#### Cross-module
+
+Cross-module dependencies use the same `depends_on` syntax — just reference a task ID from another module:
+
+```yaml
+---
+depends_on:
+  - billing/E00
+  - auth/E02
+---
+```
+
+#### Task ID formats
+
+Dependencies reference tasks by their ID, which supports two formats:
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| `module/E##` | `billing/E05` | Standard epic reference |
+| `module/PREFIX##` | `cli-impl/CLI02` | Prefixed variant for subsystems |
+
+Module names must be lowercase letters, numbers, and hyphens (e.g. `api-v2-migration`).
+
+#### Group priority tiers
+
+Groups can be assigned to priority tiers (0, 1, 2, …) to control execution order across modules. All tasks in a lower tier must complete before tasks in higher tiers become eligible:
+
+```
+Tier 0: auth            → runs first
+Tier 1: billing, reporting → run in parallel after auth completes
+Tier 2: analytics        → runs last
+```
+
+Groups not explicitly assigned default to tier 0. Tiers are configured via the TUI (press `g` on the Dashboard or Modules tab).
 
 ## Architecture
 

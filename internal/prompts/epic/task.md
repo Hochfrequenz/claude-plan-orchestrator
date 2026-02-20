@@ -19,21 +19,22 @@ NOTE: The orchestrator automatically manages epic and README status. You do NOT 
 - The README.md status emoji (orchestrator updates it automatically)
 
 Instructions:
-1. Implement the epic requirements
-2. Run tests to verify your implementation
+1. Initialize any git submodules: git submodule update --init --recursive
+2. Implement the epic requirements
+3. Run tests to verify your implementation
    - Note: The build MCP tools auto-commit uncommitted changes before building
    - PREFER using the 'test' MCP tool if available (offloads to build pool)
    - Fallback: cargo test
-3. Ensure all tests pass
-4. Run clippy and fix any warnings
+4. Ensure all tests pass
+5. Run clippy and fix any warnings
    - PREFER using the 'clippy' MCP tool if available (offloads to build pool)
    - Fallback: cargo clippy --all-targets --all-features -- -D warnings
-5. For builds, PREFER using the 'build' MCP tool if available
-6. When complete, add a "## Test Summary" section at the end of the epic file with test results
-7. Commit all changes with a descriptive commit message
-8. Push the branch to remote: git push -u origin HEAD
-9. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
-10. Merge the PR using: gh pr merge --squash --delete-branch
+6. For builds, PREFER using the 'build' MCP tool if available
+7. When complete, add a "## Test Summary" section at the end of the epic file with test results
+8. Commit all changes with a descriptive commit message
+9. Push the branch to remote: git push -u origin HEAD
+10. Create a Pull Request using: gh pr create --title "[Epic Title]" --body "Implementation of [Epic]. All tests pass."
+11. Merge the PR using: gh pr merge --squash --delete-branch
 
 Test Summary format to add to epic file:
 
